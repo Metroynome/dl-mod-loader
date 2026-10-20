@@ -1,0 +1,9 @@
+{
+  "library": "librac4",
+  "regions": [
+    "ntscu",
+    "pal",
+    "ntscj",
+    "ntsck"
+  ]
+}
