@@ -104,16 +104,80 @@ python tools/build.py build --region ntscu
 # or: make REGION=all
 ```
 
-Docker example (PowerShell):
+## Docker (no local library checkouts needed)
+
+From the repository directory, build the toolchain image once:
 
 ```powershell
-docker run --rm `
-  -v D:/Repos/Metroynome:/work/Metroynome `
-  -v D:/Repos/Horizon/libdl:/work/Horizon/libdl:ro `
-  -w /work/Metroynome/dl-mod-loader `
-  --entrypoint sh dnawrkshp/ps2dev-libdl:latest `
-  -c 'apk add --no-cache python3 && make'
+docker build -t dl-mod-loader .
+docker run --rm -v "${PWD}:/workspace" dl-mod-loader
 ```
+
+The Dockerfile runs `docker-init.sh` to install Python/make and clone pinned
+revisions of `Metroynome/librac4` and `Dnawrkshp/libdl` into the image. The
+container's default command builds both the loader cheat and all configured
+modules for all four regions. Outputs remain in this repository's `build/`,
+`hostfs/dl/mods/`, and `release/` folders. No sibling library mounts are needed.
+Network access is needed when building the image; normal module builds use the
+cloned sources already in the image.
+
+```powershell
+# Build just NTSC-U:
+docker run --rm -v "${PWD}:/workspace" dl-mod-loader make REGION=ntscu
+# Create a module, then enable its entry in hostfs/dl/module.txt and rebuild:
+docker run --rm -v "${PWD}:/workspace" dl-mod-loader make new-module NAME=my-mod LIBRARY=librac4
+```
+
+For intentional library upgrades, pass `--build-arg LIBRAC4_REF=<commit>` and/or
+`--build-arg LIBDL_REF=<commit>` to `docker build`. Library region restrictions
+still apply. The build copies library sources into `build/` before compiling.
+
+`docker-init.sh` can also initialize a fresh base-image container and run a
+command with the dependency paths exported:
+
+```powershell
+docker run --rm -v "${PWD}:/workspace" -w /workspace --entrypoint sh dnawrkshp/ps2dev-libdl:latest ./docker-init.sh make
+```
+
+Running `sh docker-init.sh` alone prepares dependencies without building. It
+refuses to reset existing modified or mismatched checkouts. Use it inside the
+Linux container, not directly in Windows PowerShell.
+
+## Make workflows inside the container
+
+After `sh docker-init.sh`, you can run these from the repository root:
+
+```sh
+make clean && make             # loader cheat and every configured module
+make modules                   # same complete build, including loader
+make module NAME=hello         # rebuild one source module folder
+make module NAME=hello REGION=ntscu
+cd modules/hello
+make clean && make             # only this module, all its supported regions
+make REGION=ntscu
+```
+
+`make clean` at the root removes generated build/release directories and regional
+hostfs binaries. It keeps module sources, `module.txt`, and the optional debug
+payload. A module-folder clean removes only that module's objects/binaries and
+keeps its address reservation. Generated module folders include a Makefile.
+
+Single-module builds use the existing regional layout. If there is no layout,
+the first invocation builds all modules to establish one. If a module grows
+beyond its reserved size or the module set/library/mode configuration changes,
+run a full root build and deploy all binaries together. A `both` source folder
+rebuilds both of its library variants. Restart emulation to load new binaries.
+A fresh project still needs the root build to produce the loader PNACH itself.
+
+To work interactively using the Dockerfile image:
+
+```powershell
+docker run --rm -it -v "${PWD}:/workspace" dl-mod-loader sh
+```
+
+The image is already initialized. The dependency directories are also discovered
+automatically by the build tool, so running `sh docker-init.sh` in a base-image
+shell does not require sourcing the script before subsequent `make` commands.
 
 ## Use in PCSX2
 

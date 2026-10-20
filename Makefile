@@ -1,9 +1,13 @@
 PYTHON ?= python3
 REGION ?= all
 LIBRARY ?= none
-.PHONY: all release modules new-module check test
+.PHONY: all release modules new-module check test clean module
 all release modules:
 	$(PYTHON) tools/build.py build --region $(REGION)
+module:
+	$(PYTHON) tools/build.py build --region $(REGION) --module "$(NAME)"
+clean:
+	$(PYTHON) tools/build.py clean
 new-module:
 	$(PYTHON) tools/build.py new "$(NAME)" --library "$(LIBRARY)"
 check:

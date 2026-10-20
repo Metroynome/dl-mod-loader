@@ -66,6 +66,7 @@ def new_module(name, library):
     items = variants(name, cfg)
     folder.mkdir(parents=True)
     (folder / "module.json").write_text(json.dumps(cfg, indent=2) + "\n")
+    (folder / "Makefile").write_text("include ../../tools/module.mk\n")
     for output, lib, mode, sources in items:
         include = f"/* Include <{lib}/...h> for this mode's game functions. */\n" if lib != "none" else ""
         if lib != "none":
@@ -144,6 +145,9 @@ class Builder:
         if name in self.libraries:
             return [self.libraries[name]]
         default = ROOT.parent / name if name == "librac4" else ROOT.parent.parent / "Horizon/libdl"
+        container_source = Path("/opt/dl-mod-loader-deps") / name
+        if container_source.is_dir():
+            default = container_source
         source = Path(os.environ.get(name.upper() + "_DIR", default)).resolve()
         regional = self.region
         makefile = "Makefile." + regional if name == "librac4" else "Makefile"
@@ -191,7 +195,17 @@ class Builder:
         release.mkdir(exist_ok=True)
         (release / f"mod-loader.{self.region}.pnach").write_text("\n".join(lines) + "\n")
 
-    def modules(self, entries):
+    def modules(self, entries, selected=None):
+        layout_path = self.work / "layout.json"
+        layout = None
+        if selected and layout_path.is_file():
+            layout = json.loads(layout_path.read_text())
+            expected = [(v[0], v[1], v[2]) for _, regions, v in entries if self.region in regions]
+            if [(x["name"], x["library"], x["mode"]) for x in layout] != expected:
+                raise ValueError("Module configuration changed; run make from the repository root first")
+        elif selected:
+            print(f"{self.region}: no layout yet; building all modules to establish addresses")
+            selected = None
         address = LOW
         report = []
         output = ROOT / "hostfs/dl/mods"
@@ -199,6 +213,11 @@ class Builder:
         for folder, regions, (name, library, mode, sources) in entries:
             if self.region not in regions:
                 continue
+            if selected and name not in selected:
+                continue
+            reservation = next((x for x in layout if x["name"] == name), None) if layout else None
+            if reservation:
+                address = int(reservation["address"], 16)
             libs = self.library(library)
             objects = []
             for i, source in enumerate(sources):
@@ -212,9 +231,24 @@ class Builder:
             end = address + header[5]
             if header[3] != address or end > HIGH or len(binary.read_bytes()) != 40 + header[4]:
                 raise ValueError(f"{name}: invalid module image/layout")
+            if reservation and header[5] > reservation["bytes"]:
+                raise ValueError(f"{name} grew beyond its reserved space; run make from the repository root and deploy all modules")
+            if selected:
+                # Validate every selected variant before publishing any binary.
+                report.append({"name": name, "binary": binary})
+                continue
             shutil.copyfile(binary, output / (name + "." + self.region + ".bin"))
             report.append({"name": name, "library": library, "mode": mode, "address": hex(address), "bytes": header[5]})
             address = (end + 63) & ~63
+        if selected:
+            dest = ROOT / "release/hostfs/dl/mods"
+            dest.mkdir(parents=True, exist_ok=True)
+            for item in report:
+                filename = item["name"] + "." + self.region + ".bin"
+                shutil.copyfile(item["binary"], output / filename)
+                shutil.copyfile(item["binary"], dest / filename)
+            print(f"{self.region}: rebuilt {len(report)} selected modules at their reserved addresses")
+            return
         built_names = {item["name"] + "." + self.region + ".bin" for item in report}
         for old in output.glob("*." + self.region + ".bin"):
             if old.name not in built_names:
@@ -241,6 +275,27 @@ def package_debug():
         destination.unlink()  # Do not leave a previously enabled handler behind.
 
 
+def clean(module=None):
+    if module:
+        names = [v[0] for folder, _, v in configs() if folder.name == module]
+        if not names:
+            raise ValueError(f"Unknown module folder: {module}")
+        for region in REGIONS:
+            for name in names:
+                shutil.rmtree(ROOT / "build" / region / "modules" / name, ignore_errors=True)
+                for base in (ROOT / "hostfs/dl/mods", ROOT / "release/hostfs/dl/mods"):
+                    path = base / (name + "." + region + ".bin")
+                    if path.exists():
+                        path.unlink()
+        # Keep layout reservations so a single-module rebuild cannot collide.
+    else:
+        for name in ("build", "release"):
+            shutil.rmtree(ROOT / name, ignore_errors=True)
+        for region in REGIONS:
+            for path in (ROOT / "hostfs/dl/mods").glob("*." + region + ".bin"):
+                path.unlink()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -249,18 +304,34 @@ def main():
     new.add_argument("--library", choices=["none", "librac4", "libdl", "both"], default="none")
     build = sub.add_parser("build", help="build loader and all declared modules")
     build.add_argument("--region", choices=["all", *REGIONS], default="all")
+    build.add_argument("--module", help="build one source module folder using the existing layout")
+    clean_parser = sub.add_parser("clean", help="remove generated output, preserving sources and debug payload")
+    clean_parser.add_argument("--module")
     sub.add_parser("check", help="validate module manifests without a compiler")
     args = parser.parse_args()
     if args.command == "new":
         new_module(args.name, args.library)
+    elif args.command == "clean":
+        clean(args.module)
     elif args.command == "check":
         print(f"Validated {len(configs())} module images")
     else:
         entries = configs()
+        selected = None
+        if args.module:
+            matching = [e for e in entries if e[0].name == args.module]
+            if not matching:
+                raise ValueError(f"Unknown module folder: {args.module}")
+            selected = {e[2][0] for e in matching}
         for region in REGIONS if args.region == "all" else [args.region]:
+            if selected and not any(region in e[1] for e in matching):
+                if args.region != "all":
+                    raise ValueError(f"{args.module} does not support {region}")
+                continue
             builder = Builder(region)
-            builder.loader()
-            builder.modules(entries)
+            if not selected:
+                builder.loader()
+            builder.modules(entries, selected)
         dest = ROOT / "release/hostfs/dl/module.txt"
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / "hostfs/dl/module.txt", dest)
