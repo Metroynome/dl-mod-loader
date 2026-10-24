@@ -1,6 +1,22 @@
 # Generated builds and release packages
 /build/
-/release/
+# Published release files are tracked; ZIPs and development outputs are not.
+/release/**
+!/release/README.md
+!/release/modules.txt
+!/release/crcs.txt
+!/release/SC*-*.pnach
+!/release/dl/
+!/release/dl/maploader-online.txt
+!/release/dl/config/
+!/release/dl/config/modules.txt
+!/release/dl/mods/
+!/release/dl/mods/*.bin
+!/release/dl/mods/utils/
+!/release/dl/mods/utils/mapscan.irx
+!/release/dl/mods/utils/exceptionhandler.bin
+!/release/horizon_unix_update_cmaps.sh
+!/release/horizon_windows_update_cmaps.ps1
 bin/
 obj/
 *.o
@@ -20,6 +36,17 @@ htmlcov/
 # Generated regional hostfs modules; keep the optional debug payload
 /hostfs/dl/mods/*.bin
 
+# Local custom-map packs and their generated catalogs
+/hostfs/dl/*.wad
+/hostfs/dl/*.world
+/hostfs/dl/*.sound
+/hostfs/dl/*.map
+/hostfs/dl/*.bg
+/hostfs/dl/*.thumb
+/hostfs/dl/*.code
+/hostfs/dl/*.version
+/hostfs/dl/maps.*.idx
+
 # Python caches and local environments
 __pycache__/
 *.py[cod]
@@ -37,3 +64,14 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# User-generated per-mod settings
+/hostfs/dl/config/*.ini
+
+/release/dl/config/*.ini
+
+/hostfs/dl/mods/utils/mapscan.irx
+/hostfs/dl/mods/mapscan.irx
+
+# Local design notes and investigations; not part of releases.
+/ideas/

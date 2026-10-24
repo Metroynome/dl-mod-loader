@@ -1,0 +1,8 @@
+# Offline development defaults. Restart after editing.
+modmenu campaign,local
+maploader local
+forge local
+menu-example 0
+hello 0
+campaign-test 0
+multiplayer-test 0

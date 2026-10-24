@@ -1,0 +1,125 @@
+/* Development-only Local Play controls. Map Loader owns all transition work. */
+#include "modules/forge/include/forge.h"
+#include "modules/modmenu/include/modmenu.h"
+
+void forgeBridgeInit(void);
+void forgeBridgeDisable(void);
+void forgeBridgeTick(const mapHopApi_t*);
+static int active(void);
+
+static const moduleApi_t* loader;
+static const modMenuApi_t* menu;
+static int enabled, tab, item, refreshItem, lastReady = -1, lastRefresh = -1;
+static int quickLoadMaps;
+static const moduleConfigField_t settings[] = {{"quickLoadMaps", &quickLoadMaps, 0, 1}};
+static const forgeApi_t service = {FORGE_API_VERSION, sizeof(forgeApi_t), active, &quickLoadMaps};
+
+static int active(void)
+{
+	return enabled && loader->context == DL_CONTEXT_LOCAL;
+}
+
+static const mapHopApi_t* hop(void)
+{
+	const mapHopApi_t* p = loader->findService(MAP_HOP_SERVICE_ID, FORGE_API_VERSION);
+	return p && p->version == FORGE_API_VERSION && p->size >= sizeof(*p) ? p : 0;
+}
+
+static void reload(void* unused)
+{
+	const mapHopApi_t* p = hop();
+	(void)unused;
+	if (p && p->reload() > 0 && menu)
+		menu->close();
+}
+
+static void refresh(void* unused)
+{
+	const mapHopApi_t* p = hop();
+	(void)unused;
+	if (p && !p->request(FORGE_REFRESH, 0) && menu)
+		menu->close();
+}
+
+static void configAction(void* saving)
+{
+	int result = saving ? loader->saveConfig("forge", settings, 1) : loader->loadConfig("forge", settings, 1);
+	loader->print("forge: %s settings result=%d\n", saving ? "save" : "load", result);
+}
+
+static void activate(void)
+{
+	forgeBridgeDisable();
+	enabled = 1;
+}
+
+static void deactivate(void)
+{
+	enabled = 0;
+	forgeBridgeDisable();
+	if (menu && tab > 0)
+		menu->removeTab(tab);
+	menu = 0;
+	tab = 0;
+	lastReady = -1;
+}
+
+int moduleInit(const moduleApi_t* api)
+{
+	loader = api;
+	forgeBridgeInit();
+	if (api->version < DL_API_VERSION || api->size < sizeof(*api))
+		return -1;
+	api->loadConfig("forge", settings, 1);
+	api->restrictContexts(DL_CONTEXT_LOCAL);
+	api->setLifecycle(activate, deactivate);
+	enabled = 1;
+	return api->publishService(FORGE_SERVICE_ID, FORGE_API_VERSION, &service);
+}
+
+void moduleUpdate(void)
+{
+	const mapHopApi_t* p = hop();
+	int ready = p && p->available();
+	static const modMenuItem_t action = {"Reload Current Map", MODMENU_ACTION, 0, 0, 0, 0, reload, 0};
+	static const modMenuItem_t refreshAction = {"Refresh Custom Maps", MODMENU_ACTION, 0, 0, 0, 0, refresh, 0};
+	static const modMenuItem_t quickLoad = {"Quick Load Maps", MODMENU_TOGGLE, &quickLoadMaps, 0, 1, 1, 0, 0};
+	static const modMenuItem_t save = {"Save Settings", MODMENU_ACTION, 0, 0, 0, 0, configAction, (void*)1};
+	static const modMenuItem_t load = {"Load Settings", MODMENU_ACTION, 0, 0, 0, 0, configAction, 0};
+	int canRefresh = p && p->context() && p->state() != FORGE_SCANNING && p->state() != FORGE_LOADING;
+	forgeBridgeTick(p);
+	if (menu && p && (p->state() == FORGE_SCANNING || p->state() == FORGE_LOADING))
+		menu->close();
+	if (!menu)
+		menu = modmenuFind(loader);
+	if (!menu)
+		return;
+	if (tab <= 0) {
+		tab = menu->addTab("forge", "Forge", DL_MODE_MULTIPLAYER);
+		if (tab <= 0)
+			return;
+		menu->setTabContexts(tab, DL_CONTEXT_LOCAL);
+		item = menu->addItem(tab, &action);
+		refreshItem = menu->addItem(tab, &refreshAction);
+		menu->addItem(tab, &quickLoad);
+		menu->addItem(tab, &save);
+		menu->addItem(tab, &load);
+		lastReady = lastRefresh = -1;
+	}
+	if (lastRefresh != canRefresh) {
+		menu->setItemEnabled(refreshItem, canRefresh);
+		lastRefresh = canRefresh;
+	}
+	if (lastReady != ready) {
+		menu->setItemEnabled(item, ready);
+		lastReady = ready;
+	}
+}
+
+void* memset(void* dest, int value, u32 size)
+{
+	u8* p = dest;
+	while (size--)
+		*p++ = (u8)value;
+	return dest;
+}
