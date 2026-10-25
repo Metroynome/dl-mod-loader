@@ -105,17 +105,21 @@ static char* hopMessage(int message)
 	return "";
 }
 
-int mapForgeActive(void)
+const forgeApi_t* mapForgeApi(void)
 {
 	const forgeApi_t* forge = mapApi->findService(FORGE_SERVICE_ID, FORGE_API_VERSION);
-	return forge && forge->version == FORGE_API_VERSION && forge->size >= sizeof(*forge) && forge->active();
+	return forge && forge->version == FORGE_API_VERSION && forge->size >= sizeof(*forge) && forge->active() ? forge : 0;
+}
+
+int mapForgeActive(void)
+{
+	return mapForgeApi() != 0;
 }
 
 int mapQuickLoadEnabled(void)
 {
-	const forgeApi_t* forge = mapApi->findService(FORGE_SERVICE_ID, FORGE_API_VERSION);
+	const forgeApi_t* forge = mapForgeApi();
 	return mapSelection >= 0 && mapSelection < mapCount && forge &&
-	       forge->version == FORGE_API_VERSION && forge->size >= sizeof(*forge) && forge->active() &&
 	       forge->quickLoadMaps && *forge->quickLoadMaps;
 }
 

@@ -2,17 +2,12 @@
 #define DL_HOST_MAPLOADER_H
 
 #include "module.h"
+#include "mapscan.h"
 #include "modules/forge/include/forge.h"
 
 #define MAP_LIMIT (96)
 #define MAP_RETAIL_COUNT (11)
 #define MAP_DIRECTORY_PENDING (-999)
-
-typedef enum mapDirectoryCommand {
-	MAP_DIRECTORY_OPEN = 1,
-	MAP_DIRECTORY_NEXT = 2,
-	MAP_DIRECTORY_CLOSE = 3
-} mapDirectoryCommand_e;
 
 /* EE layout: name ends at 0xa1; u32 alignment adds three padding bytes. */
 typedef struct mapRecord {
@@ -31,7 +26,7 @@ typedef struct mapRetail {
 	/* 0x04 */ u32 background;
 } mapRetail_t;
 
-typedef char MapRecordSize[(sizeof(mapRecord_t) == 188) ? 1 : -1];
+typedef char mapRecordSize[(sizeof(mapRecord_t) == 188) ? 1 : -1];
 
 extern const moduleApi_t* mapApi;
 extern mapRecord_t* mapRecords;
@@ -82,6 +77,7 @@ int mapLoading(void);
 void mapClearLoad(void);
 void mapMessage(const char* message);
 int mapForgeActive(void);
+const forgeApi_t* mapForgeApi(void);
 int mapHopInGame(void);
 int mapHopAvailable(void);
 /* Nonnegative values are catalog indices; negative values select -retailBase. */

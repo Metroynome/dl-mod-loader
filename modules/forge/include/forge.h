@@ -10,7 +10,7 @@
 
 /* Module-owned little-endian EE mailbox. Only request fields belong to the host.
  * Write command/name/optional gameMode first, requestId last. One request at a time. */
-#define FORGE_MAILBOX_MAGIC   (0x33475246)
+#define FORGE_MAILBOX_MAGIC   (0x34475246)
 #define FORGE_FILENAME_SIZE   (129)
 
 #ifndef FORGE_MAILBOX
@@ -89,22 +89,26 @@ typedef struct mapHopApi {
 } mapHopApi_t;
 
 typedef struct forgeMailbox {
+	/* Game-owned status. Host clients only read these fields. */
 	/* 0x00 */ u32 magic;
 	/* 0x04 */ u32 heartbeat;
-	/* 0x08 */ u32 requestId;
-	/* 0x0c */ u32 acceptedId;
-	/* 0x10 */ u32 completedId;
-	/* 0x14 */ u32 rejectedId;
-	/* 0x18 */ u8 available;
-	/* 0x19 */ u8 context;
-	/* 0x1a */ u8 capabilities;
-	/* 0x1b */ u8 command;
-	/* 0x1c */ u8 state;
-	/* 0x1d */ u8 error;
-	/* 0x1e */ u8 rejectError;
-	/* 0x1f */ u8 gameMode; /* Host: GameRuleIds, reset to CQ after consumption. */
-	/* 0x20 */ char filename[FORGE_FILENAME_SIZE];
-	/* 0xa1 */ u8 padding[3];
+	/* 0x08 */ u32 acceptedId;
+	/* 0x0c */ u32 completedId;
+	/* 0x10 */ u32 rejectedId;
+	/* 0x14 */ u8 available;
+	/* 0x15 */ u8 context;
+	/* 0x16 */ u8 capabilities;
+	/* 0x17 */ u8 state;
+	/* 0x18 */ u8 error;
+	/* 0x19 */ u8 rejectError;
+	/* 0x1a..0x1b: alignment padding before the 32-bit request ID. */
+
+	/* Host request. Write the payload first and requestId last. */
+	/* 0x1c */ u32 requestId;
+	/* 0x20 */ u8 command;
+	/* 0x21 */ u8 gameMode; /* GameRuleIds; reset to CQ after consumption. */
+	/* 0x22 */ char filename[FORGE_FILENAME_SIZE];
+	/* 0xa3 */ u8 padding[1];
 } forgeMailbox_t;
 
 /* Offsets are for 32-bit EE pointers. Export discovery remains version 1. */

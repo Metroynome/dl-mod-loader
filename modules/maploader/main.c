@@ -325,11 +325,10 @@ static void selectMap(void* context, int index)
 		if (!(index < 0 ? chooseRetail(-index) : choose((void*)(index + 1))))
 			return;
 		if (mapHopInGame()) {
-			const forgeApi_t* forge = mapApi->findService(FORGE_SERVICE_ID, FORGE_API_VERSION);
+			const forgeApi_t* forge = mapForgeApi();
 			/* UI choices stay pending until this hop. Mailbox requests use
 			 * their own mode byte and never pass through this menu callback. */
-			if (forge && forge->version == FORGE_API_VERSION && forge->size >= sizeof(*forge) &&
-			    forge->active() && forge->gameMode && *forge->gameMode >= FORGE_MODE_CQ &&
+			if (forge && forge->gameMode && *forge->gameMode >= FORGE_MODE_CQ &&
 			    *forge->gameMode <= FORGE_MODE_JUGGY && gameGetSettings() && gameGetOptions() &&
 			    *(volatile u32*)0x1608d0 == 0x27bdfff0)
 				applyGameMode(*forge->gameMode);

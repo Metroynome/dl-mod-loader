@@ -4,17 +4,23 @@
 #include "backend.h"
 #include "version.h"
 
+/* EE layouts; host pointer sizes are different. */
 typedef struct tab {
-	int handle;
-	u32 modes, contexts, executionContexts;
-	char key[32], label[32];
-	int count, cursor;
-	ModMenuListLabel listLabel, listInfo;
-	ModMenuListSelect listSelect;
-	void* context;
-	char actionLabel[24];
-	ModMenuCallback action;
-	void* actionContext;
+	/* 0x00 */ int handle;
+	/* 0x04 */ u32 modes;
+	/* 0x08 */ u32 contexts;
+	/* 0x0c */ u32 executionContexts;
+	/* 0x10 */ char key[32];
+	/* 0x30 */ char label[32];
+	/* 0x50 */ int count;
+	/* 0x54 */ int cursor;
+	/* 0x58 */ ModMenuListLabel listLabel;
+	/* 0x5c */ ModMenuListLabel listInfo;
+	/* 0x60 */ ModMenuListSelect listSelect;
+	/* 0x64 */ void* context;
+	/* 0x68 */ char actionLabel[24];
+	/* 0x80 */ ModMenuCallback action;
+	/* 0x84 */ void* actionContext;
 } tab_t;
 
 typedef struct item {
@@ -54,10 +60,29 @@ static int progressCurrent, progressTotal, progressPulse;
 static int nextHandle = 1, opened, selectedTab, selectedItem, lastLevel = -999;
 static u32 previousButtons, previousMode, closingButtons;
 static const modMenuApi_t menuApi = {
-    MODMENU_API_VERSION, sizeof(modMenuApi_t), addTab,      addItem,  removeTab,      setItemEnabled,   isOpen,
-    closeMenu,           getActiveTab,       focusTab,    setList,  setListInfo,    setTabVisibility, setTabContexts,
-    menuConfigLoad,      menuConfigSave,     setProgress, setModal, menuBackendBox, menuBackendText, setTabAction,
-    setItemValueLabel};
+	MODMENU_API_VERSION,
+	sizeof(modMenuApi_t),
+	addTab,
+	addItem,
+	removeTab,
+	setItemEnabled,
+	isOpen,
+	closeMenu,
+	getActiveTab,
+	focusTab,
+	setList,
+	setListInfo,
+	setTabVisibility,
+	setTabContexts,
+	menuConfigLoad,
+	menuConfigSave,
+	setProgress,
+	setModal,
+	menuBackendBox,
+	menuBackendText,
+	setTabAction,
+	setItemValueLabel
+};
 /* A window of whole tabs: measured text plus Horizon-style padding. Scroll
  * the first visible tab only when the focused tab would fall outside it. */
 static int firstTab;
@@ -128,7 +153,7 @@ static int addTab(const char* key, const char* label, u32 modes)
 {
 	int i, freeSlot = -1;
 	char k[32], l[32];
-	if (!copyText(k, key, sizeof(k)) || !copyText(l, label, sizeof(l)) || !modes || (modes & ~3U))
+	if (!copyText(k, key, sizeof(k)) || !copyText(l, label, sizeof(l)) || !modes || (modes & ~(u32)3))
 		return -1;
 	for (i = 0; i < MODMENU_MAX_TABS; ++i) {
 		if (tabs[i].handle && equal(tabs[i].key, k))
@@ -421,7 +446,7 @@ static void activate(int direction)
 static void number(char* dst, int value)
 {
 	char rev[12];
-	u32 n = value < 0 ? 0U - (u32)value : (u32)value;
+	u32 n = value < 0 ? 0 - (u32)value : (u32)value;
 	int i = 0, j = 0;
 	if (value < 0)
 		dst[j++] = '-';

@@ -126,5 +126,5 @@ not a proposed replacement protocol.
 
 Map filename stems now accept up to 128 ASCII characters (plus the NUL terminator).
 Update Forge, Map Loader, and `mods/utils/mapscan.irx` together, then cold-boot.
-External clients must use [PINE protocol v3](PINE.md); earlier field offsets are incompatible. The mailbox no longer contains version/size
+External clients must use [PINE protocol v4](PINE.md); earlier field offsets are incompatible. The mailbox no longer contains version/size
 fields, and accepts an optional game-mode byte (CQ by default).

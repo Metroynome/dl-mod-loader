@@ -30,10 +30,10 @@ These rules apply throughout this repository. Follow the user's current instruct
 
 - Keep module-owned public headers in `modules/<name>/include/`, private headers beside module sources, and loader headers in root `include/`. Reference shared module headers by their repository-relative paths; do not copy them into a central folder.
 - Modules must be usable without Mod Menu. The loader owns shared lifecycle, service discovery, and configuration persistence; Mod Menu provides optional UI.
-- Use the existing loader API and service discovery rather than inventing shared fixed addresses. Read `include/module.h`, `docs/ADDRESSES.md`, and the relevant module documentation before changing memory layout or public interfaces.
+- Use the existing loader API and service discovery rather than inventing shared fixed addresses. Read `include/module.h`, `ADDRESSES.md`, and the relevant module documentation before changing memory layout or public interfaces.
 - Preserve API compatibility where practical. Update affected producers, consumers, and documentation together when a change requires a new contract.
 - Preserve the declared regional and campaign/local/online support. Never reuse an address across regions or overlays without evidence. Do not present untested regions as verified.
-- Match Horizon's menu elements and styling for tabs, buttons, lists, and controller glyphs. Consult `horizon-dl-patch/patch/config.c` and the existing Mod Menu implementation rather than inventing a new visual style.
+- Match Horizon's menu elements and styling for tabs, buttons, lists, and controller glyphs. Consult `horizon-deadlocked-patch/patch/config.c` and the existing Mod Menu implementation rather than inventing a new visual style.
 - Keep game input blocked while Mod Menu is open and restore it on close/deactivation. Preserve cleanup when modules become inactive online or during context changes.
 - Use "Start Game" in UI, APIs, and documentation for this action.
 

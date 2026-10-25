@@ -1,7 +1,7 @@
 #ifndef DL_EXCEPTION_H
 #define DL_EXCEPTION_H
 
-/* SM/Horizon payload relocated to 0x98000; drawing scratch is inside its reservation. */
+/* Exception payload relocated to 0x98000; drawing scratch is inside its reservation. */
 #define EXCEPTION_ADDRESS     (0x00098000)
 #define EXCEPTION_MEMORY_SIZE (0x6000)
 #define EXCEPTION_FILE_SIZE   (10356)

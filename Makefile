@@ -6,9 +6,9 @@ LIBRARY ?= none
 REGIONS := $(if $(filter all,$(REGION)),ntscu pal ntscj ntsck,$(REGION))
 export LC_ALL := C
 
-.PHONY: all modules module catalog release check-release new-module clean clean-release test _region _assets
+.PHONY: all modules module catalog release check-release new-module clean clean-release _region _assets
 all modules module: catalog
-	+@set -eu; for region in $(REGIONS); do $(MAKE) --no-print-directory _region REGION=$$region REQUESTED_REGION=$(REGION); done
+	+@set -eu; for region in $(REGIONS); do $(MAKE) --no-print-directory _region REGION=$$region; done
 	$(MAKE) --no-print-directory _assets
 
 # Build metadata comes directly from each module's Makefile.defs.
@@ -48,7 +48,7 @@ _assets: build/mapscan/mapscan.irx
 	  test ! -f "$$asset" || cp "$$asset" "$$dest/"; \
 	done
 
-build/mapscan/mapscan.irx: $(wildcard iop/mapscan/*)
+build/mapscan/mapscan.irx: $(wildcard iop/mapscan/*) include/mapscan.h
 	mkdir -p build/mapscan
 	cp -R iop/mapscan/. build/mapscan/
 	$(MAKE) -C build/mapscan
@@ -66,10 +66,7 @@ clean:
 	@case '$(NAME)' in *[!a-z0-9_-]*) echo 'Invalid module name' >&2; exit 1;; esac
 ifeq ($(strip $(NAME)),)
 	rm -rf build
-	rm -f hostfs/dl/mods/*.ntscu.bin hostfs/dl/mods/*.pal.bin hostfs/dl/mods/*.ntscj.bin
+	rm -f hostfs/dl/mods/*.ntscu.bin hostfs/dl/mods/*.pal.bin hostfs/dl/mods/*.ntscj.bin hostfs/dl/mods/*.ntsck.bin
 else
 	$(MAKE) --no-print-directory -f Makefile.eeglobal MODULE=modules/$(NAME) clean-module
 endif
-
-test:
-	$(MAKE) -f tests/Makefile

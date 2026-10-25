@@ -11,7 +11,7 @@
 #include "strings.h"
 
 #ifndef MODULE_START
-#define MODULE_START (((u32)_loader_end + 63) & ~63)
+#define MODULE_START (((u32)_loader_end + 63) & ~(u32)63)
 #endif
 #define MODULE_END      (0x00100000)
 #define EXTRA_RAM_START (0x02000000)
@@ -32,27 +32,44 @@
 /* Named list values carry a tag so legacy numeric modes retain their ABI. */
 #define NAMED_CONTEXTS (0x100)
 
+/* EE layouts with DL_MODULE_LIMIT entries; host pointer sizes differ. */
 typedef struct loadedModule {
-	u32 address, size;
-	ModuleUpdate update;
-	ModuleInit init;
-	u32 modes, initialized, contexts, policy, active;
-	ModuleLifecycle activate, deactivate;
+	/* 0x00 */ u32 address;
+	/* 0x04 */ u32 size;
+	/* 0x08 */ ModuleUpdate update;
+	/* 0x0c */ ModuleInit init;
+	/* 0x10 */ u32 modes;
+	/* 0x14 */ u32 initialized;
+	/* 0x18 */ u32 contexts;
+	/* 0x1c */ u32 policy;
+	/* 0x20 */ u32 active;
+	/* 0x24 */ ModuleLifecycle activate;
+	/* 0x28 */ ModuleLifecycle deactivate;
 } loadedModule_t;
 
 typedef struct moduleService {
-	u32 id, version, owner;
-	const void* table;
+	/* 0x00 */ u32 id;
+	/* 0x04 */ u32 version;
+	/* 0x08 */ u32 owner;
+	/* 0x0c */ const void* table;
 } moduleService_t;
 
 typedef struct loaderState {
-	u32 magic, busy, count, mode, listLoaded, retryTicks, exceptionAttempted, exceptionReserved;
-	loadedModule_t modules[MODULE_LIMIT];
-	moduleApi_t api;
-	int configBusy;
-	u32 currentModule; /* index + 1; zero outside callbacks */
-	moduleService_t services[8];
-	u32 poolStart, poolEnd;
+	/* 0x00 */ u32 magic;
+	/* 0x04 */ u32 busy;
+	/* 0x08 */ u32 count;
+	/* 0x0c */ u32 mode;
+	/* 0x10 */ u32 listLoaded;
+	/* 0x14 */ u32 retryTicks;
+	/* 0x18 */ u32 exceptionAttempted;
+	/* 0x1c */ u32 exceptionReserved;
+	/* 0x20 */ loadedModule_t modules[MODULE_LIMIT];
+	/* 0x180 */ moduleApi_t api;
+	/* 0x1c4 */ int configBusy;
+	/* 0x1c8 */ u32 currentModule; /* index + 1; zero outside callbacks */
+	/* 0x1cc */ moduleService_t services[8];
+	/* 0x24c */ u32 poolStart;
+	/* 0x250 */ u32 poolEnd;
 } loaderState_t;
 
 extern u8 _loader_end[];
@@ -187,9 +204,8 @@ static void syncCode(void)
 static void installExceptionHandler(void)
 {
 	u8* memory = (u8*)EXCEPTION_ADDRESS;
-	u32 i, hash = 2166136261U;
+	u32 i, hash = 2166136261;
 	int fd, valid;
-	u32 address;
 
 	/* Optional and attempted once per boot, before any module initialization.
      * Missing/invalid payloads never prevent normal module loading. */
@@ -215,7 +231,7 @@ static void installExceptionHandler(void)
 	if (fileClose(fd) < 0)
 		valid = 0;
 	for (i = 0; valid && i < EXCEPTION_FILE_SIZE; ++i)
-		hash = (hash ^ memory[i]) * 16777619U;
+		hash = (hash ^ memory[i]) * 16777619;
 	if (!valid || hash != EXCEPTION_HASH) {
 		memset(memory, 0, EXCEPTION_MEMORY_SIZE);
 		printf("loader: rejected exception handler (size/read/hash)\n");
@@ -260,7 +276,7 @@ static u32 nextModuleAddress(u32 size)
 {
 	u32 address = STATE->poolStart;
 	if (STATE->count)
-		address = (STATE->modules[STATE->count - 1].address + STATE->modules[STATE->count - 1].size + 63U) & ~63U;
+		address = (STATE->modules[STATE->count - 1].address + STATE->modules[STATE->count - 1].size + 63) & ~(u32)63;
 	/* Keep each module contiguous. A module crossing the handler starts after
 	 * its workspace; absent/rejected handlers leave the whole pool available. */
 	if (STATE->exceptionReserved && address < EXCEPTION_ADDRESS + EXCEPTION_MEMORY_SIZE &&
@@ -274,7 +290,7 @@ static int validHeader(const moduleHeader_t* h)
 	u32 address = nextModuleAddress(h->memorySize);
 	return h->magic == DL_MODULE_MAGIC && h->version == DL_MODULE_VERSION &&
 	       (!h->region || h->region == DL_MODULE_REGION) && h->address == 0x000f0000 && h->modes &&
-	       !(h->modes & ~3U) && h->imageSize >= sizeof(moduleDiscovery_t) && !(h->imageSize & 3) &&
+	       !(h->modes & ~(u32)3) && h->imageSize >= sizeof(moduleDiscovery_t) && !(h->imageSize & 3) &&
 	       h->imageSize <= h->memorySize && address < STATE->poolEnd && h->memorySize <= STATE->poolEnd - address &&
 	       h->relocationCount <= (h->imageSize - sizeof(moduleDiscovery_t)) / 4 &&
 	       validEntry(h->initOffset, h->imageSize) && validEntry(h->updateOffset, h->imageSize);
@@ -307,13 +323,13 @@ static int relocateModule(int fd, const moduleHeader_t* h, u32 address)
 				*word = value;
 				break; /* R_MIPS_32 */
 			case 4:
-				*word = (*word & 0xfc000000U) | ((value >> 2) & 0x03ffffffU);
+				*word = (*word & 0xfc000000) | ((value >> 2) & 0x03ffffff);
 				break;
 			case 5:
-				*word = (*word & 0xffff0000U) | (((value + 0x8000U) >> 16) & 0xffffU);
+				*word = (*word & 0xffff0000) | (((value + 0x8000) >> 16) & 0xffff);
 				break;
 			case 6:
-				*word = (*word & 0xffff0000U) | (value & 0xffffU);
+				*word = (*word & 0xffff0000) | (value & 0xffff);
 				break;
 			default:
 				return 0;
@@ -398,7 +414,7 @@ static void loadModule(const char* name, u32 modes, char names[MODULE_LIMIT][112
 	u32 contexts = (modes & NAMED_CONTEXTS) ? (modes & ~NAMED_CONTEXTS) : modeContexts(modes);
 	if (modes & NAMED_CONTEXTS)
 		modes = (contexts & 1 ? 1 : 0) | (contexts & 6 ? 2 : 0);
-	if (!modes || (modes & ~3U) || (contexts & ~DL_CONTEXT_ALL))
+	if (!modes || (modes & ~(u32)3) || (contexts & ~DL_CONTEXT_ALL))
 		return; /* Disabled entries never open a file or reserve memory. */
 	valid = resolveModuleName(name, filename);
 	if (!valid)

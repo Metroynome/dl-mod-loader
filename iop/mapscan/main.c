@@ -4,14 +4,7 @@
 #include <sifcmd.h>
 #include <thbase.h>
 #include <sysclib.h>
-
-#define SERVICE (0x554d4151)
-
-typedef struct mapScanReply {
-	int status;
-	char name[256];
-	char pad[60];
-} mapScanReply_t;
+#include "mapscan.h"
 
 IRX_ID("dl_mapscan", 2, 0);
 static SifRpcDataQueue_t queue;
@@ -27,15 +20,15 @@ static void* dispatch(int command, void* data, int size)
 	(void)data;
 	(void)size;
 	memset(&reply, 0, sizeof(reply));
-	if (command == 1 || command == 3) {
+	if (command == MAP_DIRECTORY_OPEN || command == MAP_DIRECTORY_CLOSE) {
 		if (directory >= 0)
 			dclose(directory);
 		directory = -1;
-		if (command == 1) {
+		if (command == MAP_DIRECTORY_OPEN) {
 			directory = dopen("host0:dl", 0);
 			reply.status = directory < 0 ? directory : 1;
 		}
-	} else if (command == 2 && directory >= 0) {
+	} else if (command == MAP_DIRECTORY_NEXT && directory >= 0) {
 		memset(&entry, 0, sizeof(entry));
 		reply.status = dread(directory, &entry);
 		if (reply.status > 0) {
@@ -54,7 +47,7 @@ static void serve(void* arg)
 {
 	(void)arg;
 	SifSetRpcQueue(&queue, GetThreadId());
-	SifRegisterRpc(&server, SERVICE, dispatch, request, 0, 0, &queue);
+	SifRegisterRpc(&server, MAP_DIRECTORY_SERVICE, dispatch, request, 0, 0, &queue);
 	SifRpcLoop(&queue);
 }
 

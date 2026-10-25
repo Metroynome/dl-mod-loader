@@ -4,12 +4,9 @@
 
 #define io       (moduleConfigApi())
 #define inConfig (*moduleConfigBusy())
-#ifndef MENU_CONFIG_WRITE
-#define MENU_CONFIG_WRITE configWrite
+#ifndef CONFIG_WRITE
+#define CONFIG_WRITE configWrite
 #define CONFIG_DEFAULT_WRITE
-#endif
-
-#ifdef CONFIG_DEFAULT_WRITE
 #endif
 
 static int same(const char* a, const char* b)
@@ -89,7 +86,7 @@ static char* trim(char* s)
 
 static int integer(const char* s, int* value)
 {
-	u32 v = 0, limit = 0x7fffffffU, d;
+	u32 v = 0, limit = 0x7fffffff, d;
 	int negative = 0;
 	if (*s == '-' || *s == '+') {
 		negative = *s == '-';
@@ -107,7 +104,7 @@ static int integer(const char* s, int* value)
 	}
 	if (*s)
 		return 0;
-	*value = (int)(negative ? 0U - v : v);
+	*value = (int)(negative ? 0 - v : v);
 	return 1;
 }
 
@@ -143,10 +140,10 @@ static int parse(char* text, const moduleConfigField_t* f, int n)
 				return DL_CONFIG_INVALID;
 			for (i = 0; i < n; ++i)
 				if (same(key, f[i].key)) {
-					if ((seen & (1U << i)) || !integer(value, &values[i]) || values[i] < f[i].minimum ||
+					if ((seen & (((u32)1) << i)) || !integer(value, &values[i]) || values[i] < f[i].minimum ||
 					    values[i] > f[i].maximum)
 						return DL_CONFIG_INVALID;
-					seen |= 1U << i;
+					seen |= ((u32)1) << i;
 					break;
 				}
 		}
@@ -220,7 +217,7 @@ int moduleConfigSave(const char* mod, const moduleConfigField_t* f, int n)
 		v = (u32)*f[i].value;
 		if (*f[i].value < 0) {
 			*p++ = '-';
-			v = 0U - v;
+			v = 0 - v;
 		}
 		j = 0;
 		do {
@@ -241,7 +238,7 @@ int moduleConfigSave(const char* mod, const moduleConfigField_t* f, int n)
 		return DL_CONFIG_IO;
 	}
 	while (written < size) {
-		i = MENU_CONFIG_WRITE(fd, text + written, size - written);
+		i = CONFIG_WRITE(fd, text + written, size - written);
 		if (i <= 0 || i > size - written) {
 			result = DL_CONFIG_IO;
 			break;

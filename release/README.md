@@ -1,79 +1,33 @@
-# DL Mod Loader
+# DL Mod Loader release files
 
-Extract the ZIP for your region, or use the `all` ZIP for every supported region.
-No build tools or libraries are needed to play.
+This folder holds the release module allowlist and installation notes. The
+release packaging script also expects `crcs.txt` and the Horizon map-updater
+scripts under `tools/horizon/`. Those inputs have not yet been supplied for
+this port; use the repository's normal Make build and installation instructions.
 
-## Install
+## Install a development build
 
-1. Copy your region's `.pnach` files into PCSX2's cheats folder. NTSC-U and PAL
-   need **both** campaign and multiplayer files because they use different CRCs.
-   Enable **DL Mod Loader** for both game entries.
-2. Enable host filesystem access. Set the host root to the extracted folder
-   containing `dl/`, or copy `dl/` into your existing host root.
-3. Edit `dl/config/modules.txt` to enable modules, then fully restart the game
-   without a savestate. `dl/modules.txt` is a fallback location.
-4. Preserve your `dl/config/*.ini` settings when upgrading. Replace the loader
-   and module binaries together with files from the same release.
+1. Enable cheats and copy `build/dist/mod-loader.ntscu.pnach` into the cheat file
+   for the CRC reported by PCSX2. The tested NTSC-U Deadlocked disc uses
+   **SCUS-97465 / 9BFBCD42**. Other disc CRCs remain unverified here.
+2. Enable host filesystem access and copy `hostfs/dl/` into the host root.
+3. Edit `dl/config/modules.txt` and restart without a savestate. The secondary
+   list location is `dl/modules.txt`; settings are `dl/config/*.ini`.
+4. Upgrade the loader and module binaries together. Preserve your INI settings.
 
-Release defaults include Mod Menu, BIOS Warning, and Map Loader where supported,
-without tests/examples. NTSC-J supports campaign only. Forge is opt-in and must
-be built/copied separately. When upgrading to v2, replace older modules with
-compatible version-4 binaries.
+The release allowlist excludes development examples. Current gameplay/menu
+modules use NTSC-U libdl; other multiplayer regions and campaign menu rendering
+are not implemented. Default modules are disabled online.
 
-Online patch loading passed a user test on the current NTSC-U setup with default
-modules disabled online. Older Horizon builds using `0xa0000` for their network
-callback pointer conflict with this loader. Other online game modes and module
-combinations have not all been verified.
+Custom-map packs go directly in `dl/`. Map Loader scans on the first Local Play
+staging visit and retains its list across games. Press Square on Custom Maps,
+use Forge's Refresh Custom Maps, or send a PINE refresh after changing files.
+There are no `.idx` files. `dl/mods/utils/mapscan.irx` supplies directory access.
+Maps requiring Horizon-specific custom code/game modes are unsupported.
 
-Use L3 + R3 in front-end menus; during gameplay choose MOD MENU from the pause menu.
+The optional exception handler belongs at `dl/mods/debug/exceptionhandler.bin`.
+Remove it and restart to disable it. Expanded-RAM support requires a compatible
+BIOS; dismissing the BIOS warning does not change emulator settings.
 
-## Download custom maps
-
-The two included download scripts are copies of Horizon's updater scripts.
-Run them **from this folder, alongside `dl/`**, or copy them to your existing
-host root and run them there. They create/update the `dl/` map directory.
-
-- Windows: `powershell -File .\horizon_windows_update_cmaps.ps1`
-- Bash: `bash ./horizon_unix_update_cmaps.sh` (requires wget, hexdump and realpath).
-
-Choose the menu option for DL NTSC or R&C3 PAL. Menu numbers differ between
-scripts. Follow any script-update prompt and rerun if requested. Map packs are
-separate downloads, not included in the ZIP.
-
-`dl/mods/utils/mapscan.irx` is the required directory helper for Map Loader.
-Enter Local Play staging for the first scan. A progress popup captures input
-until it finishes. The catalog stays in memory across staging visits and games;
-no `.idx` files are used and new files are not detected automatically. Use
-Forge → Refresh Custom Maps or a PINE refresh command after changing maps.
-Without Forge, restart the game to rescan. Do not change assets while scanning
-or loading a game. Map packs requiring Horizon custom code/game modes are unsupported.
-
-`dl/mods/utils/` is also available for other mods' supporting files. Keep
-module binaries directly in `dl/mods/` and settings in `dl/config/`.
-
-## Optional exception handler
-
-To enable it, copy `dl/mods/utils/exceptionhandler.bin` into
-`dl/mods/debug/exceptionhandler.bin`, creating the debug folder if needed.
-Remove the copy from `debug/` to disable it, then restart the game.
-
-## Expanded RAM
-
-The loader can place modules in PCSX2's 128 MiB RAM when the BIOS supports it.
-Older BIOS versions may crash when entering multiplayer even if modules fall
-back to normal memory. If BIOS Warning appears, disable expanded RAM or use a
-compatible BIOS, then restart. Cross or Triangle dismisses the warning; it does
-not fix the setting.
-
-## Regions and documentation
-
-| Region | Campaign CRC | Multiplayer CRC |
-| --- | --- | --- |
-| NTSC-U (SCUS-97353) | 45FE0CC4 | 49536F3F |
-| PAL (SCES-52456) | 17125698 | EDE8B391 |
-| NTSC-J (SCPS-15084) | 64DC6000 | Unsupported |
-
-Older PCSX2 builds may need each file renamed to `<CRC>.pnach`.
-Full [configuration documentation](https://github.com/Metroynome/dl-mod-loader/blob/master/docs/CONFIG.md),
-[map limitations](https://github.com/Metroynome/dl-mod-loader/blob/master/modules/maploader/README.md),
-and build instructions are in the repository.
+See the repository README and `modules/forge/PINE.md` for build instructions,
+menu controls, limitations and editor integration.

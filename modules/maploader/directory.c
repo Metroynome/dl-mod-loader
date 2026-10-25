@@ -8,14 +8,6 @@
 #define bindRpc    CALL(0x12a538, int (*)(SifRpcClientData_t*, int, int))
 #define callRpc    CALL(0x12a718, int (*)(SifRpcClientData_t*, int, int, void*, int, void*, int, void*, void*))
 #define rpcBusy    CALL(0x12a918, int (*)(SifRpcClientData_t*))
-#define MAP_DIRECTORY_SERVICE (0x554d4151) /* Shared with iop/mapscan. */
-
-typedef struct mapScanReply {
-	/* 0x00 */ int status;
-	/* 0x04 */ char name[256];
-	/* 0x104 */ char padding[60];
-} mapScanReply_t;
-
 static SifRpcClientData_t client __attribute__((aligned(64)));
 static int request[16] __attribute__((aligned(64)));
 static mapScanReply_t reply __attribute__((aligned(64)));

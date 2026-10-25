@@ -11,7 +11,6 @@ all clean:
 else
 
 .DEFAULT_GOAL := image
-ROOT := $(CURDIR)
 WORK := build/$(REGION)
 EE_PREFIX ?= ee-
 EE_CC := $(EE_PREFIX)gcc
@@ -36,9 +35,7 @@ MODE ?= $(if $(filter librac4,$(LIBRARY)),campaign,$(if $(filter libdl,$(LIBRARY
 IMAGE ?= $(MODULE_NAME)
 IMAGE_LIBRARY := $(LIBRARY)
 IMAGE_MODE := $(MODE)
-CHECK_OBJS := $(EE_OBJS)
 ifeq ($(LIBRARY),both)
-CHECK_OBJS := $(CAMPAIGN_OBJS) $(MULTIPLAYER_OBJS)
 ifeq ($(IMAGE),$(MODULE_NAME)-campaign)
 IMAGE_LIBRARY := librac4
 IMAGE_MODE := campaign
@@ -123,7 +120,7 @@ $(OBJDIR)/%.o: $(SOURCE_DIR)/%.S $(LIB_ARCHIVE) Makefile.eeglobal $(wildcard $(M
 	$(EE_CC) $(EE_CFLAGS) $(EE_INCS) -c $< -o $@
 -include $(OBJECTS:.o=.d)
 
-# Relink to honor the address selected by the root build, even if objects are unchanged.
+# Relink so each invocation packages the current image and relocation metadata.
 .PHONY: image FORCE
 $(ELF): $(OBJECTS) $(LIB_ARCHIVE) $(LINKFILE) FORCE
 	$(EE_CC) $(EE_LDFLAGS) -Wl,-Map,$(@:.elf=.map) -o $@ $(OBJECTS) $(LIB_ARCHIVE) $(EE_LIBS) -lgcc
@@ -141,7 +138,7 @@ image: $(ELF)
 else
 comma := ,
 HOST_CC ?= cc
-build/relocate: tools/relocate.c include/types.h
+build/relocate: tools/relocate.c include/module.h include/types.h
 	@mkdir -p build
 	$(HOST_CC) -std=c99 -Wall -Wextra $< -o $@
 image: $(ELF) build/relocate

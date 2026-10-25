@@ -26,13 +26,16 @@
  * Callbacks run synchronously on the game thread. Never block inside one. */
 typedef void (*ModMenuCallback)(void* context);
 
+/* Pointer-bearing offsets describe the EE's 32-bit ABI. */
 typedef struct modMenuItem {
-	const char* label;
-	u32 type;
-	int* value;
-	int minimum, maximum, step;
-	ModMenuCallback callback;
-	void* context;
+	/* 0x00 */ const char* label;
+	/* 0x04 */ u32 type;
+	/* 0x08 */ int* value;
+	/* 0x0c */ int minimum;
+	/* 0x10 */ int maximum;
+	/* 0x14 */ int step;
+	/* 0x18 */ ModMenuCallback callback;
+	/* 0x1c */ void* context;
 } modMenuItem_t;
 
 /* Compatibility aliases; persistence is owned by the loader. */
@@ -44,48 +47,49 @@ typedef void (*ModMenuListSelect)(void* context, int index);
 typedef int (*ModMenuModal)(u32 pressed);
 
 typedef struct modMenuApi {
-	u32 version, size;
-	int (*addTab)(const char* key, const char* label, u32 modes);
-	int (*addItem)(int tab, const modMenuItem_t* item);
-	int (*removeTab)(int tab);
-	int (*setItemEnabled)(int item, int enabled);
-	int (*isOpen)(void);
-	void (*close)(void);
+	/* 0x00 */ u32 version;
+	/* 0x04 */ u32 size;
+	/* 0x08 */ int (*addTab)(const char* key, const char* label, u32 modes);
+	/* 0x0c */ int (*addItem)(int tab, const modMenuItem_t* item);
+	/* 0x10 */ int (*removeTab)(int tab);
+	/* 0x14 */ int (*setItemEnabled)(int item, int enabled);
+	/* 0x18 */ int (*isOpen)(void);
+	/* 0x1c */ void (*close)(void);
 	/* Appended API-1 fields; size guards callers using this extension. */
-	int (*getActiveTab)(void);
-	int (*focusTab)(int tab);
+	/* 0x20 */ int (*getActiveTab)(void);
+	/* 0x24 */ int (*focusTab)(int tab);
 	/* Virtual list: entries do not consume item slots. X commits selection. */
-	int (*setList)(int tab, int count, ModMenuListLabel label, ModMenuListSelect select, void* context, int initial);
+	/* 0x28 */ int (*setList)(int tab, int count, ModMenuListLabel label, ModMenuListSelect select, void* context, int initial);
 	/* Optional information for the highlighted row, displayed on the left. */
-	int (*setListInfo)(int tab, ModMenuListLabel info);
+	/* 0x2c */ int (*setListInfo)(int tab, ModMenuListLabel info);
 	/* Contexts are independent of module execution modes; combine with |. */
-	int (*setTabVisibility)(int tab, u32 contexts);
+	/* 0x30 */ int (*setTabVisibility)(int tab, u32 contexts);
 	/* API-1 extension: execution contexts ANDed with the existing screen
      * visibility filter. Thus LOCAL + MAIN_MENU means Local Play menus only. */
-	int (*setTabContexts)(int tab, u32 contexts);
+	/* 0x34 */ int (*setTabContexts)(int tab, u32 contexts);
 	/* host0:dl/config/<mod>.<region>.ini. Explicit calls, never per frame.
      * Save replaces the file; comments/unknown keys are not preserved. */
-	int (*loadConfig)(const char* mod, const modMenuConfigField_t* fields, int count);
-	int (*saveConfig)(const char* mod, const modMenuConfigField_t* fields, int count);
+	/* 0x38 */ int (*loadConfig)(const char* mod, const modMenuConfigField_t* fields, int count);
+	/* 0x3c */ int (*saveConfig)(const char* mod, const modMenuConfigField_t* fields, int count);
 	/* Modal progress overlay. total<=0 shows indeterminate discovery;
      * label=NULL dismisses it. Caller must dismiss on deactivation. */
-	void (*setProgress)(const char* label, int current, int total);
+	/* 0x40 */ void (*setProgress)(const char* label, int current, int total);
 	/* Optional module-owned popup. Returns zero if another popup owns it.
 	 * Owner must clear it with NULL on deactivation; content is not copied. */
-	int (*setModal)(ModMenuModal draw);
-	void (*drawBox)(float x, float y, float width, float height, u32 color);
-	void (*drawText)(float x, float y, u32 color, const char* text);
+	/* 0x44 */ int (*setModal)(ModMenuModal draw);
+	/* 0x48 */ void (*drawBox)(float x, float y, float width, float height, u32 color);
+	/* 0x4c */ void (*drawText)(float x, float y, u32 color, const char* text);
 	/* Focused-tab Square action. Label is copied; NULL callback clears it.
 	 * Appended API-1 extension; EE function-pointer offset is 0x50. */
-	int (*setTabAction)(int tab, const char* label, ModMenuCallback callback, void* context);
+	/* 0x50 */ int (*setTabAction)(int tab, const char* label, ModMenuCallback callback, void* context);
 	/* EE offset 0x54: named choices for a range, wrapping at either end.
 	 * Uses the item's context and current value; NULL restores a numeric range. */
-	int (*setItemValueLabel)(int item, ModMenuListLabel label);
+	/* 0x54 */ int (*setItemValueLabel)(int item, ModMenuListLabel label);
 } modMenuApi_t;
 
 /* Look this up again after mode changes; absence is normal, not fatal.
  * Retry registration from moduleUpdate until the provider is available. */
-static const modMenuApi_t* modmenuFind(const moduleApi_t* loader)
+static inline const modMenuApi_t* modmenuFind(const moduleApi_t* loader)
 {
 	const modMenuApi_t* menu;
 	if (!loader || loader->version < 2 || !loader->findService)

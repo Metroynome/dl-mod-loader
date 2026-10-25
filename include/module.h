@@ -18,7 +18,8 @@
 #define DL_LOADER_DISCOVERY_MAGIC   (0x444c4c44)
 #define DL_MODULE_DISCOVERY_MAGIC   (0x444d4c44)
 #define DL_DISCOVERY_VERSION        (1)
-#define DL_MODULE_EXPORTS           __attribute__((section(".module.exports"), used))
+/* Global exports are retained by KEEP(.module.exports) in src/module.ld. */
+#define DL_MODULE_EXPORTS           __attribute__((section(".module.exports")))
 #define DL_MODULE_TABLE_MAGIC       (0x444d5442)
 #define DL_MODULE_LIMIT             (8)
 
@@ -37,72 +38,97 @@
 
 typedef void (*ModuleLifecycle)(void);
 
-/* REGION is set by Makefile.eeglobal: 1=NTSC-U, 2=PAL, 3=NTSC-J. */
+/* REGION: 1=NTSC-U, 2=PAL, 3=NTSC-J, 4=NTSC-K.
+ * Pointer-bearing offsets below describe the EE's 32-bit ABI, not host tools. */
 typedef struct moduleHeader {
-	u32 magic, version, region, address;
-	u32 imageSize, memorySize, initOffset, updateOffset;
-	u32 modes, relocationCount;
+	/* 0x00 */ u32 magic;
+	/* 0x04 */ u32 version;
+	/* 0x08 */ u32 region;
+	/* 0x0c */ u32 address;
+	/* 0x10 */ u32 imageSize;
+	/* 0x14 */ u32 memorySize;
+	/* 0x18 */ u32 initOffset;
+	/* 0x1c */ u32 updateOffset;
+	/* 0x20 */ u32 modes;
+	/* 0x24 */ u32 relocationCount;
 } moduleHeader_t;
 
 /* Version 4 images are linked at a common base, then moved by the loader.
  * Relocations follow imageSize bytes; BSS and relocation records are not code. */
 typedef struct moduleRelocation {
-	u32 offset, type, value;
+	/* 0x00 */ u32 offset;
+	/* 0x04 */ u32 type;
+	/* 0x08 */ u32 value;
 } moduleRelocation_t;
 
 typedef struct moduleInfo {
-	char name[112]; /* Canonical filename, e.g. forge.ntscu.bin. */
-	u32 address, size, modes;
+	/* 0x00 */ char name[112]; /* Canonical filename, e.g. forge.ntscu.bin. */
+	/* 0x70 */ u32 address;
+	/* 0x74 */ u32 size;
+	/* 0x78 */ u32 modes;
 } moduleInfo_t;
 
 typedef struct moduleTable {
-	u32 magic, version, count, entrySize;
-	moduleInfo_t entries[DL_MODULE_LIMIT];
+	/* 0x00 */ u32 magic;
+	/* 0x04 */ u32 version;
+	/* 0x08 */ u32 count;
+	/* 0x0c */ u32 entrySize;
+	/* 0x10 */ moduleInfo_t entries[DL_MODULE_LIMIT];
 } moduleTable_t;
 
 /* Fixed EE discovery layouts. Pointer fields are 32-bit EE addresses. */
 typedef struct loaderDiscovery {
-	u32 moduleTable, magic, version, size;
-	u32 reserved[8];
+	/* 0x00 */ u32 moduleTable;
+	/* 0x04 */ u32 magic;
+	/* 0x08 */ u32 version;
+	/* 0x0c */ u32 size;
+	/* 0x10 */ u32 reserved[8];
 } loaderDiscovery_t;
 
 /* At moduleInfo_t.address. Zero exports means the module has no public table. */
 typedef struct moduleDiscovery {
-	u32 exports, magic, version, size;
+	/* 0x00 */ u32 exports;
+	/* 0x04 */ u32 magic;
+	/* 0x08 */ u32 version;
+	/* 0x0c */ u32 size;
 } moduleDiscovery_t;
 
 typedef struct moduleConfigField {
-	const char* key;
-	int* value;
-	int minimum, maximum;
+	/* 0x00 */ const char* key;
+	/* 0x04 */ int* value;
+	/* 0x08 */ int minimum;
+	/* 0x0c */ int maximum;
 } moduleConfigField_t;
 
 typedef struct moduleApi {
-	u32 version, region, mode;
-	int (*print)(const char* format, ...);
-	int (*open)(const char* path, int flags, u16 mode);
-	int (*read)(int fd, void* buffer, int size);
-	int (*close)(int fd);
-	void (*flushCache)(int operation);
+	/* 0x00 */ u32 version;
+	/* 0x04 */ u32 region;
+	/* 0x08 */ u32 mode;
+	/* 0x0c */ int (*print)(const char* format, ...);
+	/* 0x10 */ int (*open)(const char* path, int flags, u16 mode);
+	/* 0x14 */ int (*read)(int fd, void* buffer, int size);
+	/* 0x18 */ int (*close)(int fd);
+	/* 0x1c */ void (*flushCache)(int operation);
 	/* Services are discovered by ID and exact API version, not linked address.
      * publishService is valid only inside a module callback. The loader owns
      * the registry; pointers remain valid until emulation restarts. */
-	int (*publishService)(u32 id, u32 version, const void* service);
-	const void* (*findService)(u32 id, u32 version);
+	/* 0x20 */ int (*publishService)(u32 id, u32 version, const void* service);
+	/* 0x24 */ const void* (*findService)(u32 id, u32 version);
 
 	/* API 3: execution context, independent of the campaign/MP library mode.
      * Registration is valid only inside this module's init/update callbacks.
      * The configuration is an upper bound; restrictContexts cannot expand it.
      * Deactivate releases all hooks/input/UI; activate runs on every re-entry. */
-	u32 size, context;
-	int (*setLifecycle)(ModuleLifecycle activate, ModuleLifecycle deactivate);
-	int (*restrictContexts)(u32 contexts);
+	/* 0x28 */ u32 size;
+	/* 0x2c */ u32 context;
+	/* 0x30 */ int (*setLifecycle)(ModuleLifecycle activate, ModuleLifecycle deactivate);
+	/* 0x34 */ int (*restrictContexts)(u32 contexts);
 	/* API 4: optional persistence, independent of Mod Menu.
      * host0:dl/config/<mod>.<region>.ini; explicit synchronous operations. */
-	int (*loadConfig)(const char* mod, const moduleConfigField_t* fields, int count);
-	int (*saveConfig)(const char* mod, const moduleConfigField_t* fields, int count);
+	/* 0x38 */ int (*loadConfig)(const char* mod, const moduleConfigField_t* fields, int count);
+	/* 0x3c */ int (*saveConfig)(const char* mod, const moduleConfigField_t* fields, int count);
 	/* Optional trailing field: check size before reading on older loaders. */
-	u32 warnings;
+	/* 0x40 */ u32 warnings;
 } moduleApi_t;
 
 /* Retain the pointer, not a copy: mode and function pointers change on a

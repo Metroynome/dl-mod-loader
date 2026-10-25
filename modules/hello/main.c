@@ -13,7 +13,7 @@ int moduleInit(const moduleApi_t* api)
 
 void moduleUpdate(void)
 {
-	/* Match the SM example: report progress every 300 loader callbacks.
+	/* Report progress every 300 loader callbacks.
      * These are hook calls, not necessarily video frames. */
 	if (++updates % 300 == 0)
 		loader->print("hello: %u updates\n", updates);

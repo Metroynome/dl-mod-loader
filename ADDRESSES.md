@@ -13,14 +13,17 @@ The FlushCache syscall sequence anchors the extracted core mapping.
 | sceRead | 0x0012b980 | 0x27bdff20 |
 | FlushCache | 0x00126e20 | 0x24030064 |
 
-Horizon Deadlocked's plugin uses the `sceGsSyncV` return at `0x00138dfc`.
-All four extracted cores contain `ld s0,0(sp)` at `0x00138df8`, `jr ra` at the
-hook, and `addiu sp,sp,32` at `0x00138e00`. The PNACH checks the surrounding
-instructions before replacing the return with the loader jump. Campaign uses its existing cheat-template return at `0x00139a48`, preceded by
-`ld s0,0(sp)` and followed by `addiu sp,sp,64`. Both sites match all four cores.
-Each wrapper passes its intended mode; mismatching hooks do not dispatch.
-A live NTSC-U menu test showed Horizon's hook initializing but not continuously
-updating at boot, so the campaign hook is required for recurring callbacks.
+The loader wraps the sync entries at `0x001399e0` (campaign) and
+`0x00138d70` (multiplayer). The displaced prologues are `addiu sp,sp,-64` /
+`sd s1,16(sp)` and `addiu sp,sp,-32` / `sd s0,0(sp)`, respectively.
+Each trampoline replays that prologue, runs the original function, then updates
+modules. This preserves drawing timing while leaving Horizon's return hook at
+`0x00138dfc` intact. PNACH templates check nearby original instructions before
+installing either entry wrapper.
+
+The five SDK signatures above and both entry prologues were compared against
+all four extracted retail cores. No regional entry addresses were inferred.
+Runtime mode filtering selects one wrapper; unknown level IDs defer updates.
 
 | Region | Current level global (librac4/include/game.h) |
 |---|---|
@@ -28,22 +31,17 @@ updating at boot, so the campaign hook is required for recurring callbacks.
 | PAL | 0x0021de90 |
 | NTSC-J / NTSC-K | 0x00238610 |
 
-Level IDs come from `RAC Levels/rac-defs.json`, game 4: main menu -1;
-campaign planets 1?15 (sparse), co-op +20, multiplayer lobby 39, multiplayer
-planets +40, splitscreen +60. `librac4` additionally recognizes level 0 as a
-menu state. The adapter enumerates these IDs instead of treating arbitrary
-unknown values as valid gameplay. Library functions still need their own
-player/overlay readiness checks.
+Level IDs come from `RAC Levels/rac-defs.json`, game 4: boot menu -1;
+campaign planets 1 through 15 (sparse), co-op +20, multiplayer lobby 39,
+multiplayer planets +40 and splitscreen +60. Level 0 is the multiplayer
+front-end/staging state. The adapter enumerates known IDs and checks native
+menu/connection state before assigning Local Play or online contexts.
 
-`tools/verify_addresses.py` checks SDK entry words and the hook sequence against
-all four regional boot cores. This does not establish complete runtime or
-library correctness. The available libdl is NTSC-U only; the loader rejects
-other region/library combinations. No heap or allocator edits are performed.
-
-Live NTSC-U PCSX2 verification confirms the boot menu level is -1, the five SDK
-signatures match, both expected modules initialize, and the campaign hook keeps
-the hello counter advancing after initialization. Multiplayer gameplay and
-non-US runtime transitions remain untested.
+The available libdl is NTSC-U only. Loader/library-free builds cover all four
+regions; builds and matching core signatures do not establish complete runtime
+support. NTSC-U Local Play tests cover menu/input, map scanning, custom/retail
+starts and hops, reloads, mode presets, HUD, minimaps and loading backgrounds.
+Other multiplayer regions and campaign menu rendering still need porting.
 
 ## Forge mode presets (NTSC-U)
 

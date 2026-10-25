@@ -3,13 +3,9 @@
  * This is packaging, not a size policy: the runtime owns allocation/validation. */
 #include <stdio.h>
 #include <stdlib.h>
-#include "../include/types.h"
+#include "../include/module.h"
 #include <string.h>
 #include <elf.h>
-
-typedef struct record {
-	u32 offset, type, value;
-} record_t;
 
 static void fail(const char* s)
 {
@@ -52,7 +48,7 @@ static void bounds(size_t offset, size_t length, size_t size)
 
 static int order(const void* a, const void* b)
 {
-	u32 x = ((const record_t*)a)->offset, y = ((const record_t*)b)->offset;
+	u32 x = ((const moduleRelocation_t*)a)->offset, y = ((const moduleRelocation_t*)b)->offset;
 	return x < y ? -1 : x > y;
 }
 
@@ -65,7 +61,7 @@ int main(int argc, char** argv)
 	u32 base, count = 0;
 	u32 i, j;
 	FILE* out;
-	record_t* records;
+	moduleRelocation_t* records;
 	if (argc != 4)
 		fail("usage: relocate ELF FLAT OUTPUT");
 	elf = readFile(argv[1], &es);
@@ -123,10 +119,10 @@ int main(int argc, char** argv)
 					target = v - base;
 					break;
 				case R_MIPS_26:
-					target = ((v & 0x03ffffffU) << 2) - base;
+					target = ((v & 0x03ffffff) << 2) - base;
 					break;
 				case R_MIPS_LO16:
-					target = ((v & 0xffffU) - (base & 0xffffU)) & 0xffffU;
+					target = ((v & 0xffff) - (base & 0xffff)) & 0xffff;
 					break;
 				case R_MIPS_HI16:
 					/* ELF REL HI16 records pair with the following LO16 for the
@@ -138,7 +134,7 @@ int main(int argc, char** argv)
 					if (k == n)
 						fail("unpaired MIPS HI16 relocation");
 					bounds((size_t)(rel[k].r_offset - base) + 40, 4, bs);
-					target = ((v & 0xffffU) << 16) + (int16_t)word(bin + 40 + rel[k].r_offset - base) - base;
+					target = ((v & 0xffff) << 16) + (int16_t)word(bin + 40 + rel[k].r_offset - base) - base;
 					break;
 				default:
 					fail("unsupported MIPS relocation (compile with -G0 -mno-abicalls)");

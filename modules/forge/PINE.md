@@ -1,4 +1,4 @@
-# Forge PINE interface v3
+# Forge PINE interface v4
 
 Forge owns a **164-byte, 16-byte-aligned mailbox in its module BSS**.
 There is no fixed mailbox address or loader-owned reservation.
@@ -21,23 +21,23 @@ discovered mailbox address, and `id` is a fresh nonzero 32-bit request ID.
 Every command uses this same procedure:
 
 1. Verify the mailbox header and advancing heartbeat. Require `available != 0`
-   at `M + 0x18` and the expected context at `M + 0x19`: `1` for staging,
+   at `M + 0x14` and the expected context at `M + 0x15`: `1` for staging,
    `2` for a running game. Wait for any previous command or menu-triggered
    scan/load to finish. Do not send during a transition.
-2. Check the one-byte capabilities field at `M + 0x1a`:
+2. Check the one-byte capabilities field at `M + 0x16`:
    `(capabilities & (1 << command)) != 0` must be true.
-3. Write the command number as **one byte** to `M + 0x1b`.
-4. Write a **129-byte, zero-filled ASCII buffer** to `M + 0x20`, containing
+3. Write the command number as **one byte** to `M + 0x20`.
+4. Write a **129-byte, zero-filled ASCII buffer** to `M + 0x22`, containing
    the filename or retail ID below. Leave it all zero for an empty argument.
-   Optionally write the game mode byte to `M + 0x1f` (see Game modes below).
+   Optionally write the game mode byte to `M + 0x21` (see Game modes below).
    Finish all payload writes before the next step.
-5. Write `id` as a **four-byte little-endian integer** to `M + 0x08` **last**.
+5. Write `id` as a **four-byte little-endian integer** to `M + 0x1c` **last**.
    This submits the request. Do not write any game-owned fields or overwrite
    the whole mailbox.
-6. Poll for this exact `id`. If `rejectedId` at `M + 0x14` matches, stop and
-   report `rejectError` at `M + 0x1e`. Otherwise wait for `completedId` at
-   `M + 0x10` to match. Success requires `state == 3` at `M + 0x1c` and
-   `error == 0` at `M + 0x1d`. State `4` means failure; report `error`.
+6. Poll for this exact `id`. If `rejectedId` at `M + 0x10` matches, stop and
+   report `rejectError` at `M + 0x19`. Otherwise wait for `completedId` at
+   `M + 0x0c` to match. Success requires `state == 3` at `M + 0x17` and
+   `error == 0` at `M + 0x18`. State `4` means failure; report `error`.
    `acceptedId == id` only means accepted, **not finished**.
 
 Use one command at a time. Do not reset IDs to zero between commands. After
@@ -150,7 +150,7 @@ No memory scan is needed. All pointers are 32-bit little-endian EE addresses.
    `1` at +`0x04`, size `16` at +`0x08`, and the mailbox pointer at
    +`0x0c`. The C declaration is `forgeExports_t` in `modules/forge/include/forge.h`.
 5. Require a 16-byte-aligned mailbox entirely within Forge's address/size range.
-   Check mailbox magic `0x33475246` (`FRG3`) and the full 164-byte range.
+   Check mailbox magic `0x34475246` (`FRG4`) and the full 164-byte range.
    The mailbox has no version or size fields.
    Re-read discovery pointers and the table entry to detect a restart during
    discovery. Verify heartbeat at mailbox + `0x04` advances, then check
@@ -165,7 +165,7 @@ Play instead of writing commands. A paused emulator also stops the heartbeat.
 Cache addresses only for the current session. Rediscover after restart,
 savestate load, module replacement, changed header, or stopped heartbeat.
 
-**Protocol v3 is incompatible with earlier mailbox layouts.** Rebuild/deploy
+**Protocol v4 is incompatible with earlier mailbox layouts.** Rebuild/deploy
 Forge and Map Loader together and cold-boot. Update external clients before
 sending commands. Loader/module/exports discovery headers remain version 1;
 the mailbox is identified by its new magic. Forge/Map Loader service ABI is 3.
@@ -173,25 +173,30 @@ The mailbox is 164 bytes, including space for 128 filename characters plus NUL.
 
 | Offset | Bytes | Field | Owner / meaning |
 | --- | --- | --- | --- |
-| 0x00 | 4 | magic | Game: `0x33475246` (`FRG3`) |
+| 0x00 | 4 | magic | Game: `0x34475246` (`FRG4`) |
 | 0x04 | 4 | heartbeat | Game: advances on Forge updates |
-| 0x08 | 4 | requestId | **Host: write LAST**, nonzero |
-| 0x0c | 4 | acceptedId | Game: most recently accepted request |
-| 0x10 | 4 | completedId | Game: most recently completed request |
-| 0x14 | 4 | rejectedId | Game: most recently rejected request |
-| 0x18 | 1 | available | Game: compatible Map Loader available |
-| 0x19 | 1 | context | Game: 0 unavailable, 1 staging, 2 game |
-| 0x1a | 1 | capabilities | Game: bit `(1 << command)` |
-| 0x1b | 1 | command | Host: command number |
-| 0x1c | 1 | state | Game: accepted operation state |
-| 0x1d | 1 | error | Game: accepted operation error |
-| 0x1e | 1 | rejectError | Game: rejected operation error |
-| 0x1f | 1 | gameMode | Host: optional native mode ID; reset to CQ when consumed |
-| 0x20 | 129 | filename | Host: up to 128 ASCII characters plus NUL |
-| 0xa1 | 3 | padding | Zero; do not write |
+| 0x08 | 4 | acceptedId | Game: most recently accepted request |
+| 0x0c | 4 | completedId | Game: most recently completed request |
+| 0x10 | 4 | rejectedId | Game: most recently rejected request |
+| 0x14 | 1 | available | Game: compatible Map Loader available |
+| 0x15 | 1 | context | Game: 0 unavailable, 1 staging, 2 game |
+| 0x16 | 1 | capabilities | Game: bit `(1 << command)` |
+| 0x17 | 1 | state | Game: accepted operation state |
+| 0x18 | 1 | error | Game: accepted operation error |
+| 0x19 | 1 | rejectError | Game: rejected operation error |
+| 0x1a | 2 | alignment padding | Do not write |
+| 0x1c | 4 | requestId | **Host: write LAST**, nonzero |
+| 0x20 | 1 | command | Host: command number |
+| 0x21 | 1 | gameMode | Host: optional native mode ID; reset to CQ when consumed |
+| 0x22 | 129 | filename | Host: up to 128 ASCII characters plus NUL |
+| 0xa3 | 1 | padding | Zero; do not write |
 
-Write `command` as **one byte**, not a 32-bit word: adjacent bytes belong to the
-game. Write filename separately, then the aligned 32-bit request ID last.
+All host-editable fields are grouped at `0x1c` through `0xa2`. Command, gameMode
+and filename form one contiguous 131-byte payload starting at `0x20`. You may
+write that payload together, or write each field separately using its listed
+width. Complete those writes before writing the aligned request ID at `0x1c`
+**last**. Never submit the entire request block with a new ID in one write; the
+game could consume it before the payload is complete.
 
 ## Game modes
 
