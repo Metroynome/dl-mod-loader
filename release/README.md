@@ -7,17 +7,19 @@ this port; use the repository's normal Make build and installation instructions.
 
 ## Install a development build
 
-1. Enable cheats and copy `build/dist/mod-loader.ntscu.pnach` into the cheat file
-   for the CRC reported by PCSX2. The tested NTSC-U Deadlocked disc uses
-   **SCUS-97465 / 9BFBCD42**. Other disc CRCs remain unverified here.
+1. Enable cheats and copy `build/dist/mod-loader.<region>.pnach` into the cheat
+   file for the CRC reported by PCSX2. Verified disc CRCs are NTSC-U
+   **SCUS-97465 / 9BFBCD42**, PAL **SCES-53285 / D697D204**, and NTSC-J
+   **SCPS-15100 / 2EC9DA96**. Use the binary files for that same region.
 2. Enable host filesystem access and copy `hostfs/dl/` into the host root.
 3. Edit `dl/config/modules.txt` and restart without a savestate. The secondary
    list location is `dl/modules.txt`; settings are `dl/config/*.ini`.
 4. Upgrade the loader and module binaries together. Preserve your INI settings.
 
-The release allowlist excludes development examples. Current gameplay/menu
-modules use NTSC-U libdl; other multiplayer regions and campaign menu rendering
-are not implemented. Default modules are disabled online.
+The release allowlist excludes development examples. Mod Menu has regional
+campaign/co-op backends for NTSC-U, PAL, NTSC-J and NTSC-K. Map Loader, Forge
+and multiplayer Mod Menu target NTSC-U; other multiplayer regions are not
+implemented. Default modules are disabled online.
 
 Custom-map packs go directly in `dl/`. Map Loader scans on the first Local Play
 staging visit and retains its list across games. Press Square on Custom Maps,

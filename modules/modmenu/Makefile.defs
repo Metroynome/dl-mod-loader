@@ -1,5 +1,5 @@
 # Module settings; shared build rules are in ../../Makefile.eeglobal.
-LIBRARY = libdl
+LIBRARY = librac4
 MODE = both
-REGIONS = ntscu
+REGIONS = ntscu pal ntscj ntsck
 EE_OBJS = main.o backend.o

@@ -186,7 +186,7 @@ static int commandRequest(u32 command, const char* name, u8 gameMode)
 		return FORGE_ERROR_BUSY;
 	if (!context)
 		return FORGE_ERROR_CONTEXT;
-	if (command < FORGE_RELOAD || command > FORGE_SELECT_RETAIL)
+	if (command < FORGE_REFRESH || command > FORGE_RELOAD)
 		return FORGE_ERROR_COMMAND;
 	if (command != FORGE_REFRESH && gameMode > GAMERULE_JUGGY)
 		return FORGE_ERROR_MODE;

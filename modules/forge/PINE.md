@@ -6,15 +6,16 @@ Use PINE EE memory reads/writes; this is not a host-process pointer. Forge v2
 needs no plugin-specific transport. The Forge mod consumes commands on its
 normal game-thread update. No editor source changes are included here.
 
-Enable `forge local`, `maploader`, and optionally `modmenu` in modules.txt.
+Enable `forge campaign,local`, `maploader local`, and optionally `modmenu` in modules.txt.
 The protocol works without Mod Menu. Currently supported: NTSC-U Deadlocked Local Play
-staging and the retail base IDs listed below. Online, campaign, boot menus,
-and transitions do not accept new map commands.
+staging and the retail base IDs listed below. Command 1 can enter Local Play
+from the boot menu. Online, loaded campaign levels and transitions do not accept
+new commands; map commands also require staging or a running Local Play game.
 
 ## Quick guide: send a command
 
 First enable PINE in PCSX2, boot the game, and enter **Local Play staging** or
-a running Local Play game. Discover the mailbox using the pointer chain below;
+a running Local Play game (or the boot menu for command 1). Discover the mailbox using the pointer chain below;
 never hard-code a module or mailbox address. In these examples, `M` means the
 discovered mailbox address, and `id` is a fresh nonzero 32-bit request ID.
 
@@ -22,7 +23,7 @@ Every command uses this same procedure:
 
 1. Verify the mailbox header and advancing heartbeat. Require `available != 0`
    at `M + 0x14` and the expected context at `M + 0x15`: `1` for staging,
-   `2` for a running game. Wait for any previous command or menu-triggered
+   `2` for a running game, `3` for the boot menu. Wait for any previous command or menu-triggered
    scan/load to finish. Do not send during a transition.
 2. Check the one-byte capabilities field at `M + 0x16`:
    `(capabilities & (1 << command)) != 0` must be true.
@@ -45,6 +46,22 @@ reconnecting, read the existing IDs and choose an unused ID for that session;
 do not blindly start at `1`. If a command times out, report it and inspect the
 heartbeat/context before retrying; it may still be running. Never automatically
 resubmit a Start Game or hop with a new ID while its outcome is unknown.
+
+### Enter Local Play when automatic boot is off
+
+1. Enable Forge for `campaign,local` and cold-boot with `bootToLocalPlay=0`.
+   Press Start to dismiss the intro and show the Campaign/Multiplayer menu.
+   The command is not advertised during an intro or preview movie.
+2. Discover the mailbox. Require context `3` and capability bit `0x02`.
+3. Send **command `1` (`FORGE_LOCAL_PLAY`)**, empty filename, using the normal
+   payload-first/request-ID-last procedure. The game-mode byte is ignored.
+4. Wait for successful completion. Native Local Play staging is now open;
+   no game has started. You can then select a map and send Start Game below.
+
+This is a one-time request, not a configuration change. The saved boot toggle
+stays off. Map Loader and Mod Menu are not required for this command. The request
+survives the brief unavailable context while multiplayer loads. Do not resend it
+because availability or heartbeat briefly stops during that transition.
 
 ### Refresh the custom map list
 
@@ -74,22 +91,22 @@ Use the stem from `dl/hoven gorge.version`: `hoven gorge`, not the display name
    was added/rebuilt and needs a refresh first.
 3. Wait for **successful completion**. The map is selected and its staging
    name is updated, but the game has not started.
-4. Send **command `5`**, empty argument, using a **new request ID**.
+4. Send **command `6`**, empty argument, using a **new request ID**.
 5. Wait for successful completion. Gameplay is ready on the selected map.
 
 Stop if selection fails; sending Start Game anyway would use the previous
 selection. To start whatever map is already selected, skip steps 2 and 3.
-Command `5` does not accept a map filename. It applies the requested game mode,
+Command `6` does not accept a map filename. It applies the requested game mode,
 defaulting to CQ, with that mode's objective/spawn flags.
 
 ### Hop to a retail map or reload the current map
 
-- **Retail hop:** in a running game, send **command `6`**, argument `"42"`
+- **Retail hop:** in a running game, send **command `5`**, argument `"42"`
   for Catacrom Graveyard, and wait for success. The argument is ASCII decimal text,
   not a binary integer. Supported retail IDs are listed below.
-- **Retail start:** in staging, send command `6`, wait for success, then send
-  command `5` with an empty argument and a new ID.
-- **Reload:** in a running game, send **command `1`**, empty argument, and
+- **Retail start:** in staging, send command `5`, wait for success, then send
+  command `6` with an empty argument and a new ID.
+- **Reload:** in a running game, send **command `7`**, empty argument, and
   wait for success. It reloads the current retail/custom map. For a rebuilt
   custom map whose metadata or file sizes changed, use command `4` with its
   filename instead so the catalog is refreshed before loading.
@@ -108,7 +125,7 @@ test newly built custom map:
 	wait until all build output files are completely written
 	if context == 1:                         // staging
 		sendAndWait(command = 4, filename = "hoven gorge", id = nextRequestId())
-		sendAndWait(command = 5, filename = "", id = nextRequestId())
+		sendAndWait(command = 6, filename = "", id = nextRequestId())
 	else if context == 2:                    // running game
 		sendAndWait(command = 4, filename = "hoven gorge", id = nextRequestId())
 	else:
@@ -158,17 +175,15 @@ No memory scan is needed. All pointers are 32-bit little-endian EE addresses.
 
 The headers and exports table are read-only to the host. The exports and mailbox
 pointers exist as soon as Forge is loaded, but the mailbox header is initialized
-only when Forge first initializes in Local Play. Loaded does not imply active.
-If the header is not ready or the heartbeat is stopped, wait for running Local
-Play instead of writing commands. A paused emulator also stops the heartbeat.
+only when Forge first initializes in an allowed context. Loaded does not imply
+active. If the header is not ready or the heartbeat is stopped, wait for the
+boot menu or running Local Play. A paused emulator also stops the heartbeat.
 
 Cache addresses only for the current session. Rediscover after restart,
 savestate load, module replacement, changed header, or stopped heartbeat.
 
-**Protocol v4 is incompatible with earlier mailbox layouts.** Rebuild/deploy
-Forge and Map Loader together and cold-boot. Update external clients before
-sending commands. Loader/module/exports discovery headers remain version 1;
-the mailbox is identified by its new magic. Forge/Map Loader service ABI is 3.
+Deploy Forge and Map Loader together and cold-boot. Loader/module/exports
+discovery headers use version 1; Forge/Map Loader service ABI is 3.
 The mailbox is 164 bytes, including space for 128 filename characters plus NUL.
 
 | Offset | Bytes | Field | Owner / meaning |
@@ -178,8 +193,8 @@ The mailbox is 164 bytes, including space for 128 filename characters plus NUL.
 | 0x08 | 4 | acceptedId | Game: most recently accepted request |
 | 0x0c | 4 | completedId | Game: most recently completed request |
 | 0x10 | 4 | rejectedId | Game: most recently rejected request |
-| 0x14 | 1 | available | Game: compatible Map Loader available |
-| 0x15 | 1 | context | Game: 0 unavailable, 1 staging, 2 game |
+| 0x14 | 1 | available | Game: Map Loader or boot command backend available |
+| 0x15 | 1 | context | Game: 0 unavailable, 1 staging, 2 game, 3 boot menu |
 | 0x16 | 1 | capabilities | Game: bit `(1 << command)` |
 | 0x17 | 1 | state | Game: accepted operation state |
 | 0x18 | 1 | error | Game: accepted operation error |
@@ -214,14 +229,14 @@ Write it before `requestId`. Forge snapshots and resets it to CQ when consuming
 **any** request, including rejections. Omitting the byte on the next request uses
 CQ. Wait for acknowledgement before preparing another request.
 
-Commands 1, 3, 4, 5 and 6 apply the mode after the map request validates. Refresh
-(command 2) ignores it and leaves the mode unchanged. Refresh-and-select retains
+Commands 3, 4, 5, 6 and 7 apply the mode after the map request validates. Refresh
+(command 2) and Enter Local Play (command 1) ignore it. Refresh-and-select retains
 the requested mode while scanning. Unsupported values reject with error 9.
 A missing map or rejected request leaves the current mode unchanged.
 
 For a CTF start from staging, send command 3 (or 4) with `gameMode = 1`, wait
-for completion, then command 5 with `gameMode = 1` again. For a Deathmatch hop,
-send command 3 or 6 with `gameMode = 2`. A reload (command 1) without the byte
+for completion, then command 6 with `gameMode = 1` again. For a Deathmatch hop,
+send command 3 or 5 with `gameMode = 2`. A reload (command 7) without the byte
 switches to CQ. Menu/shortcut reloads and in-game menu hops apply Forge's pending
 Game Mode choice, which starts with the mode chosen for the current game.
 In staging, the selector updates the staging settings and label immediately.
@@ -239,33 +254,30 @@ them; a mode preset does not turn them off.
 
 ## Commands
 
-| Number | Command | Staging | In match |
-|---|---|---|---|
-| 1 | Reload current | Reject: no active game | Reload the current retail or custom map |
-| 2 | Refresh | Rescan catalog | Rescan catalog |
-| 3 | Select/load filename | Select map and update staging name; user still presses Start | Hop to map |
-| 4 | Refresh and select/load filename | Rescan, find and select map | Rescan, find and hop to map |
-| 5 | Start Game | Start the current map with the requested mode (CQ by default) | Reject: already in a game |
-| 6 | Select/load retail map | Clear custom override and select retail base | Hop to retail base |
+| Number | Command | Boot menu | Staging | In game |
+|---|---|---|---|---|
+| 1 | Enter Local Play | Open Local Play staging | Reject | Reject |
+| 2 | Refresh | Reject | Rescan catalog | Rescan catalog |
+| 3 | Select/load custom map | Reject | Select custom map | Hop to custom map |
+| 4 | Refresh and select/load custom map | Reject | Rescan and select custom map | Rescan and hop to custom map |
+| 5 | Select/load retail map | Reject | Clear custom override and select retail base | Hop to retail base |
+| 6 | Start Game | Reject | Start the selected map | Reject |
+| 7 | Reload current map | Reject | Reject | Reload the current retail/custom map |
 
-Start Game takes no filename. Select a map with command 3 or 4 first if needed,
-wait for that request to finish, then submit command 5 with a new ID. Retail maps
-also work: whatever is selected in staging is used. The command defers the normal
-retail Start Game callback until the next update, allowing Mod Menu to close,
-and reports completion only when gameplay is ready. It preserves the game's
-normal roster, overlay selection and HUD initialization. Mode changes apply
-the native game-flag preset described above. The callback
-is signature-checked; unavailable code or invalid selected map files reject the
-request. Leaving staging before execution cancels it. It cannot start online games.
-Staging capabilities are now `0x7c`; in-game capabilities are `0x5e`.
-Older builds without bit `(1 << 5)` do not implement Start Game.
+Start Game takes no filename. Select a map with command 3, 4 or 5 first if needed,
+wait for success, then submit command 6 with a new ID. The native Start Game
+callback runs on the next update so Mod Menu can close first. Completion means
+that gameplay is ready. Leaving staging before execution cancels the request;
+it cannot start online games. Game-mode changes use the native presets above.
 
-Command 6 (`FORGE_SELECT_RETAIL`) uses the existing filename field as a
-NUL-terminated **decimal base-map ID**, for example `"42"`. Only the IDs in the following table are accepted. It takes no host path and does not scan custom maps. Check
-capability bit `(1 << 6)` before sending it. In staging, wait for completion and
-then send command 5 if you want to start the game. In gameplay, completion means
-the retail transition and HUD setup finished. Command 1 subsequently reloads that
-retail map; commands 3/4 can switch back to custom maps.
+Capabilities: boot menu `0x02`, staging `0x7c`, in game `0xbc`.
+Always check `(capabilities & (1 << command)) != 0` before submitting.
+
+Command 5 (`FORGE_SELECT_RETAIL`) uses the filename field as a NUL-terminated
+**decimal base-map ID**, such as `"42"`. It takes no host path and does not scan
+custom maps. In staging, wait for success before sending command 6 to start.
+In gameplay, success means the transition and HUD setup finished. Command 7
+then reloads that retail map; commands 3/4 can switch back to custom maps.
 
 | ID | Retail map |
 |---|---|
@@ -281,55 +293,50 @@ retail map; commands 3/4 can switch back to custom maps.
 | 53 | Maraxus Prison |
 | 54 | Ghost Station |
 
-Example filename: `hoven gorge`, not `Hoven Gorge`, `hoven gorge.wad`, or a host path.
-Names are case-sensitive, 1-128 printable ASCII bytes. Separators, traversal,
-colons, wildcards, leading dots and unterminated strings are rejected. Files must
-pass Map Loader's usual map-pack validation. A missing map is an explicit error.
-Refresh preserves selection by filename when present; removed maps lose selection.
-In-game refresh requires the same mapscan helper as staging. It updates the
-catalog only: use command 1 or 4 to load changed map content.
+For custom maps, use the filename stem: `hoven gorge`, not `Hoven Gorge`,
+`hoven gorge.wad`, or a host path. Names are case-sensitive, 1â€“128 printable
+ASCII bytes. Separators, traversal, colons, wildcards, leading dots and
+unterminated strings are rejected. Files must pass Map Loader validation.
+A missing map is an explicit error. Refresh preserves selection by filename
+when present; removed maps lose selection. In-game refresh requires mapscan.
+Refresh only updates the catalog: use command 7 or 4 to load changed content.
 
 ## Submission and completion
 
-1. Read magic, available, context and capabilities. Verify heartbeat
-   advances when emulation is running. A stopped heartbeat may simply mean pause.
-2. Wait for earlier accepted work to complete. Choose a fresh nonzero request ID;
-   never reuse an ID in a session (skip zero on wraparound).
-3. Write command and a zero-padded 129-byte filename field. For commands 1/2/5,
-   an empty filename is sufficient. Optionally write gameMode; omitted means CQ.
-   Wait for these PINE writes to complete.
-4. Write requestId **last**, in a separate completed write.
-5. Poll: `rejectedId == id` reports rejection; `acceptedId == id` acknowledges
-   work; `completedId == id` reports terminal state/error. Do not interpret an
-   old completedId or old rejection as the current response.
+1. Verify magic, advancing heartbeat, availability, context and capabilities.
+2. Wait for earlier accepted work to finish. Choose a fresh nonzero request ID.
+3. Write command and a zero-padded 129-byte filename. Commands 1/2/6/7 use an
+   empty filename. Optionally write gameMode; omitted means CQ.
+4. Complete those writes, then write requestId **last**, in a separate write.
+5. Poll for that exact ID: rejectedId reports rejection, acceptedId acknowledges
+   work, and completedId reports terminal state/error. Ignore earlier IDs.
 
-The mod copies the payload and rechecks requestId before accepting it. Do not
-modify payload fields until acknowledged, and use one editor/writer per mailbox.
-Repeating the same requestId does not execute it again. A new request while busy
-is rejected without replacing active work; its rejection has separate fields.
-If accepted, IDs/status are written before the completion marker. Read the
-completion marker again around status reads if submitting consecutive requests.
+The mod snapshots the payload and rechecks requestId before accepting it.
+Keep payload fields unchanged until acknowledgement and use one writer per
+mailbox. Duplicate IDs do not execute again. Requests while busy are rejected
+without replacing active work; rejections have separate ID/error fields.
+Read completedId again around status reads to avoid mixing consecutive results.
 
 States: 0 idle, 1 scanning, 2 loading/queued transition, 3 complete, 4 failed.
 Errors: 0 none, 1 wrong context, 2 busy, 3 unknown command, 4 invalid filename,
-5 map not found, 6 scan failure, 7 selection/loading/HUD failure, 8 inactive, 9 invalid game mode.
-Rejected requests have separate ID/error fields and do not replace the accepted operation.
+5 map not found, 6 scan failure, 7 selection/loading/HUD failure, 8 inactive,
+9 invalid game mode.
 
-Leaving Local Play marks Forge unavailable and cancels its pending response.
-Requests posted while inactive are discarded on reactivation. Restarting the
-game resets the mailbox; reconnect and recheck the handshake. Savestate rewind
-can rewind IDs and heartbeat, so the editor should abandon outstanding requests
-and establish a new session after loading a savestate. No network authentication
-is implemented here; access control belongs to the emulator's PINE endpoint.
+Leaving Local Play cancels pending map responses. Command 1 retains its response
+across its own boot-to-multiplayer transition. Requests posted while inactive
+are discarded on reactivation. A restart resets the mailbox; reconnect and
+rediscover it. After a savestate rewind, abandon outstanding requests and
+establish a new session. Access control belongs to the emulator's PINE endpoint.
 
 ## Verification
 
-The existing mailbox checks cover request ordering, duplicate IDs, busy rejection,
-inactivity, 128-character filenames, and unterminated-name rejection. Live NTSC-U
-mailbox tests covered selection, Start Game, custom/retail hops, and repeated
-reloads. Mode selection was verified with Metropolis CTF and Hoven Gorge CQ,
-including their objectives, HUD and gameplay. The same mailbox protocol is used for debugger and PINE memory writes;
-editor-side PINE integration still needs its own verification.
+Mailbox checks cover ordering, duplicate IDs, busy rejection, inactivity,
+128-character filenames, unterminated names, and boot-request completion across
+context changes. Live NTSC-U tests covered selection, Start Game, custom/retail
+hops and repeated reloads. Metropolis CTF and Hoven Gorge CQ were checked with
+objectives, HUD and gameplay. Enter Local Play was tested through PINE with
+automatic boot off, preserving that saved setting. Those live checks preceded
+this command renumbering; Forge v2's client should use the command IDs above.
 
-Campaign, online, PAL, NTSC-J, and split-screen hopping are unsupported in this
-port. See [Forge support notes](README.md#support-and-limitations).
+Campaign, online, PAL, NTSC-J and split-screen hopping remain unsupported.
+See [Forge support notes](README.md#support-and-limitations).

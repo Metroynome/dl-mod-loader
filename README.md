@@ -52,9 +52,9 @@ The list falls back to `dl/modules.txt` if `dl/config/modules.txt` is absent.
 Settings live in `dl/config/<mod>.<region>.ini`.
 
 ```text
-modmenu local
+modmenu campaign,local
 maploader local
-forge local
+forge campaign,local
 bios-warning local
 hello disabled
 ```
@@ -78,19 +78,20 @@ modules do not need a fixed address in their Makefiles.
 | --- | --- |
 | modmenu | Shared menu and tab API; optional for other modules |
 | maploader | Local Play retail/custom-map selection and refresh |
-| forge | Reloads, map hopping, game-mode choices and PINE commands |
+| forge | Local Play boot shortcut, reloads, map hopping, game-mode choices and PINE commands |
 | bios-warning | Optional warning for incompatible expanded-RAM BIOS settings |
 | menu-example | Example tab and configuration persistence |
 | hello / campaign-test / multiplayer-test | Development examples |
 
 The loader and library-free modules build for NTSC-U, PAL, NTSC-J and NTSC-K.
-librac4 has regional campaign builds. The available libdl and the current
-Mod Menu, Map Loader and Forge implementations target **NTSC-U multiplayer**.
-Campaign menu rendering and other multiplayer regions still need porting.
+librac4 provides Mod Menu's campaign/co-op rendering for all four regions.
+Map Loader, Forge and multiplayer Mod Menu target **NTSC-U multiplayer**;
+other multiplayer regions still need porting.
 A successful regional build does not verify its runtime addresses.
 
-Open Mod Menu with L3 + R3 in Local Play menus. During gameplay, use MOD MENU
-from the pause menu. Forge's reload shortcut is **L1 + D-pad Up + Circle**.
+Open Mod Menu with L3 + R3 at the boot menu or in Local Play menus. During
+gameplay, use MOD MENU from the pause menu. Forge's reload shortcut is
+**L1 + D-pad Up + Circle**.
 See [Forge](modules/forge/README.md) and its [PINE interface](modules/forge/PINE.md)
 for game-mode, configuration and editor-integration behavior.
 

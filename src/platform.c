@@ -28,9 +28,9 @@ static u32 levelMode(void)
 {
 	int level;
 #if DL_MODULE_REGION == 2
-	level = *(volatile int*)0x0021de90;
+	level = *(volatile int*)0x0021de98;
 #elif DL_MODULE_REGION == 3 || DL_MODULE_REGION == 4
-	level = *(volatile int*)0x00238610;
+	level = *(volatile int*)0x00238618;
 #else
 	level = *(volatile int*)0x0021de10;
 #endif

@@ -12,7 +12,7 @@ Build/copy Forge and its dependencies, then enable:
 ```text
 modmenu local
 maploader local
-forge local
+forge campaign,local
 ```
 
 Restart emulation after installing binaries or changing `modules.txt`. Forge is
@@ -20,13 +20,21 @@ opt-in and is not currently included by the release module allowlist. See the
 [root build instructions](../../README.md#build-with-docker).
 
 - **Reload Current Map:** open MOD MENU from the in-game pause menu, then choose
-  Forge → Reload Current Map. Works with retail and custom maps.
+  Forge â†’ Reload Current Map. Works with retail and custom maps.
 - **Change maps:** choose a named map in the in-game Custom Maps list and press
   Cross. The menu closes and a normal loading transition begins.
 - **Game Mode:** starts with the mode chosen for this game. Scroll left/right
   through the named modes. In staging, the mode label/settings update immediately
   and Start Game uses that choice. During gameplay, Reload Current Map, the
   reload shortcut, or an in-game map hop applies the pending choice.
+- **Boot to Local Play:** on by default. Save Settings to retain the toggle,
+  then cold-boot to apply it. Forge skips into multiplayer, follows the native
+  Local Play/Create Game path, and stops at staging without starting the game.
+  It runs once per boot; exiting multiplayer later does not redirect you again.
+  Turning it off keeps normal startup. Allow both `campaign,local` contexts so
+  Forge can set the boot flags before multiplayer loads.
+  PINE command 1 can request the same route from the boot menu while the saved
+  option is off, without changing that setting.
 - **Chargeboots / Infinite Ammo:** separate toggles, both on by default. Forge
   enforces their game-rule values in staging and gameplay, across starts, reloads
   and hops. Turn them off in Forge to disable them. Chargeboots uses the game's
@@ -51,23 +59,24 @@ promise to preserve transient player state, scores, or timers.
 Forge's tab includes **Quick Load Maps**, **Game Mode**, **Save Settings**, and **Load Settings**.
 Quick Load Maps defaults to off. When enabled, it bypasses loading VSync only
 for custom-map starts, hops, and reloads. Retail maps retain normal VSync.
-Save Settings writes Quick Load Maps, the pending mode choice, and both toggles to
+Save Settings writes the boot option, Quick Load Maps, the mode choice and both gameplay toggles to
 `host0:dl/config/forge.ntscu.ini`; Load Settings restores it. Saved settings are
 also loaded when Forge initializes, without requiring Mod Menu. Loading settings
 changes the mode immediately in staging, or queues it during gameplay; the two
 toggles apply immediately. Each new game starts with its own chosen mode.
-Defaults are Quick Load off, Chargeboots on, and Infinite Ammo on.
+Defaults are Boot to Local Play on, Quick Load off, Chargeboots on, and Infinite Ammo on.
 
 The module-owned mailbox accepts:
 
 | Command | Purpose |
 | --- | --- |
-| Reload current | Reload the active retail/custom map |
+| Enter Local Play | Enter staging from the boot menu without enabling automatic boot |
 | Refresh | Rescan available map packs |
 | Select/load filename | Select in staging; hop during gameplay |
 | Refresh and select/load | Rescan before selection/hopping |
+| Select/load retail | Select or hop to a supported retail base |
 | Start Game | Start from staging with current map/settings |
-| Select/load retail | Select or hop to retail base 40–49 |
+| Reload current | Reload the active retail/custom map |
 
 To start a newly selected map, wait for selection to complete, then send Start
 Game with a new request ID. Accepted work is not necessarily finished: always
@@ -75,8 +84,9 @@ check completion and error fields. Busy or unsupported requests are rejected.
 
 PINE works without Mod Menu. Discover the mailbox through the loader/module
 headers; never hard-code its address. [PINE.md](PINE.md) defines the exact layout,
-commands, ordering, readiness checks, and error codes. Tests used debugger EE
-memory writes; actual editor-side PINE transport still needs integration testing.
+commands, ordering, readiness checks, and error codes. Map commands were tested
+with debugger EE writes; Enter Local Play was also verified through PINE with
+the saved boot option off. Forge v2's integration remains editor-side work.
 
 ## Support and limitations
 
@@ -85,7 +95,8 @@ memory writes; actual editor-side PINE transport still needs integration testing
 - No automatic file watching, build-triggered reload, or position restoration.
 - Finish writing map files before scanning or loading. A failure after teardown
   may require restarting the game.
-- Mod Menu is optional for commands and the reload shortcut; Map Loader is required.
+- Mod Menu is optional for commands and the reload shortcut. Map Loader is
+  required for map commands, but not Enter Local Play.
 
 Live NTSC-U tests covered Hoven Gorge and Metropolis, retail Battledome Tower
 and Catacrom Graveyard, repeated reloads, and returning to staging. Gameplay,

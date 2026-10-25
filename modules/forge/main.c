@@ -1,9 +1,18 @@
-/* Development-only Local Play controls. Map Loader owns all transition work. */
+/* Forge boot and Local Play controls. Map Loader owns map transitions. */
 #include "modules/forge/include/forge.h"
 #include "modules/modmenu/include/modmenu.h"
 #include <libdl/game.h>
 #include <libdl/gamesettings.h>
 #include <libdl/pad.h>
+#include <libdl/ui.h>
+
+typedef enum forgeBootStage {
+	FORGE_BOOT_INITIAL,
+	FORGE_BOOT_MULTIPLAYER,
+	FORGE_BOOT_CREATE,
+	FORGE_BOOT_STAGING,
+	FORGE_BOOT_DONE
+} forgeBootStage_e;
 
 void forgeBridgeInit(void);
 void forgeBridgeDisable(void);
@@ -18,17 +27,103 @@ static int enabled, tab, item, refreshItem, lastReady = -1, lastRefresh = -1;
 static int quickLoadMaps, reloadHeld = 1;
 static int selectedGameMode, lastGameContext = -1;
 static int chargeboots = 1, infiniteAmmo = 1;
+static int bootToLocalPlay = 1;
+static int bootRequested;
+static forgeState_e bootResult;
+static forgeBootStage_e bootStage;
 static const moduleConfigField_t settings[] = {
 	{"quickLoadMaps", &quickLoadMaps, 0, 1},
 	{"gameMode", &selectedGameMode, FORGE_MODE_CQ, FORGE_MODE_JUGGY},
 	{"chargeboots", &chargeboots, 0, 1},
-	{"infiniteAmmo", &infiniteAmmo, 0, 1}
+	{"infiniteAmmo", &infiniteAmmo, 0, 1},
+	{"bootToLocalPlay", &bootToLocalPlay, 0, 1}
 };
 static const forgeApi_t service = {FORGE_API_VERSION, sizeof(forgeApi_t), active, &quickLoadMaps, &selectedGameMode};
 
 static int active(void)
 {
 	return enabled && loader->context == DL_CONTEXT_LOCAL;
+}
+
+/* Automatic boot runs once. An explicit mailbox request can also use this
+ * flow without changing the saved Boot to Local Play preference. */
+static void bootLocalPlay(void)
+{
+	UiMenu_t* current;
+	if (bootStage == FORGE_BOOT_DONE)
+		return;
+	if (!bootToLocalPlay && !bootRequested) {
+		bootStage = FORGE_BOOT_DONE;
+		return;
+	}
+	if (loader->mode == DL_MODE_CAMPAIGN) {
+		if (bootStage == FORGE_BOOT_INITIAL && *(volatile int*)0x21de10 == -1) {
+			*(volatile u8*)0x21de69 = 1; /* Boot into the multiplayer UI. */
+			*(volatile u32*)0x21de80 = 0; /* eNWLobbyInitToMain, never Online. */
+			*(volatile u32*)0x21edbc = 1; /* Skip the intro. */
+			bootStage = FORGE_BOOT_MULTIPLAYER;
+		}
+		return;
+	}
+	if (!active() || *(volatile int*)0x21de10 != 0 || *(volatile u32*)0x22026c != 1)
+		return;
+	current = uiGetActivePointer();
+	if (!current)
+		return;
+	if (bootStage == FORGE_BOOT_MULTIPLAYER && uiGetActive() == UI_ID_MULTIPLAYER_MENU) {
+		*(volatile u8*)0x21de69 = 0; /* Do not redirect later returns to the boot menu. */
+		/* Native Local Play action selects this Create Game screen. */
+		uiChangeMenu(UI_MENU_ID_CREATE_GAME1);
+		bootStage = FORGE_BOOT_CREATE;
+	} else if (bootStage == FORGE_BOOT_CREATE && current == uiGetPointer(UI_MENU_ID_CREATE_GAME1)) {
+		/* Native Create Game submission initializes the local roster, rules,
+		 * map and network state before entering staging. No fake pad input. */
+		if (*(volatile u32*)0x743da0 != 0x27bdffb0) {
+			bootStage = FORGE_BOOT_DONE;
+			bootResult = FORGE_FAILED;
+			return;
+		}
+		((void (*)(UiMenu_t*))0x743da0)(current);
+		uiChangeMenu(UI_MENU_ID_LOCAL_PLAY_STAGING);
+		bootStage = FORGE_BOOT_STAGING;
+	} else if (bootStage == FORGE_BOOT_STAGING && current == uiGetPointer(UI_MENU_ID_LOCAL_PLAY_STAGING)) {
+		bootStage = FORGE_BOOT_DONE;
+		bootResult = FORGE_COMPLETE;
+	}
+}
+
+int forgeBootAvailable(void)
+{
+	int level = *(volatile int*)0x21de10;
+	return enabled && loader->mode == DL_MODE_CAMPAIGN &&
+	       (level == -1 || (level == 1 && *(volatile int*)0x1711a8 == -1)) &&
+	       *(volatile u8*)0x306dc0 && /* Boot menu is active, not an intro/preview movie. */
+	       *(volatile int*)0x306dc4 == 32 && /* GuiMenu_PlayerData[0].iScreen: BootMain. */
+	       *(volatile u32*)0x4a20c8 == 0x27bdfff0 &&
+	       *(volatile u32*)0x4a20d8 == 0x0c126c68 &&
+	       (bootStage == FORGE_BOOT_INITIAL || bootStage == FORGE_BOOT_DONE);
+}
+
+u32 forgeBootState(void)
+{
+	return bootResult;
+}
+
+int forgeBootRequest(void)
+{
+	const modMenuApi_t* currentMenu;
+	if (!forgeBootAvailable())
+		return FORGE_ERROR_CONTEXT;
+	currentMenu = modmenuFind(loader);
+	if (currentMenu)
+		currentMenu->close();
+	bootRequested = 1;
+	bootResult = FORGE_LOADING;
+	bootStage = FORGE_BOOT_MULTIPLAYER;
+	/* BootMain_CMDMultiCB queues the native Multiplayer screen. Startup
+	 * flags alone no longer take effect once BootMain is already open. */
+	((void (*)(void*))0x4a20c8)(0);
+	return 0;
 }
 
 /* Forge owns these two rules while active, including in staging. Keep the
@@ -122,6 +217,10 @@ static void deactivate(void)
 {
 	enabled = 0;
 	reloadHeld = 1;
+	if (bootResult == FORGE_LOADING && *(volatile u32*)0x1af91c) {
+		bootResult = FORGE_FAILED;
+		bootStage = FORGE_BOOT_DONE;
+	}
 	forgeBridgeDisable();
 	if (menu && tab > 0)
 		menu->removeTab(tab);
@@ -137,15 +236,22 @@ int moduleInit(const moduleApi_t* api)
 	if (api->version < DL_API_VERSION || api->size < sizeof(*api))
 		return -1;
 	api->loadConfig("forge", settings, sizeof(settings) / sizeof(settings[0]));
-	api->restrictContexts(DL_CONTEXT_LOCAL);
+	api->restrictContexts(DL_CONTEXT_CAMPAIGN | DL_CONTEXT_LOCAL);
 	api->setLifecycle(activate, deactivate);
 	enabled = 1;
 	reloadHeld = 1;
+	bootLocalPlay();
 	return api->publishService(FORGE_SERVICE_ID, FORGE_API_VERSION, &service);
 }
 
 void moduleUpdate(void)
 {
+	bootLocalPlay();
+	if (loader->mode != DL_MODE_MULTIPLAYER) {
+		forgeBridgeTick(0);
+		return; /* No libdl menu/player calls in campaign or the boot overlay. */
+	}
+	{
 	const mapHopApi_t* hopApi = hop();
 	int ready = hopApi && hopApi->available();
 	static const modMenuItem_t action = {"Reload Current Map", MODMENU_ACTION, 0, 0, 0, 0, reload, 0};
@@ -156,6 +262,7 @@ void moduleUpdate(void)
 	};
 	static const modMenuItem_t boots = {"Chargeboots", MODMENU_TOGGLE, &chargeboots, 0, 1, 1, applyGameOptions, 0};
 	static const modMenuItem_t ammo = {"Infinite Ammo", MODMENU_TOGGLE, &infiniteAmmo, 0, 1, 1, applyGameOptions, 0};
+	static const modMenuItem_t boot = {"Boot to Local Play", MODMENU_TOGGLE, &bootToLocalPlay, 0, 1, 1, 0, 0};
 	static const modMenuItem_t save = {"Save Settings", MODMENU_ACTION, 0, 0, 0, 0, configAction, (void*)1};
 	static const modMenuItem_t load = {"Load Settings", MODMENU_ACTION, 0, 0, 0, 0, configAction, 0};
 	int canRefresh = hopApi && hopApi->context() && hopApi->state() != FORGE_SCANNING && hopApi->state() != FORGE_LOADING;
@@ -187,6 +294,7 @@ void moduleUpdate(void)
 		menu->setItemValueLabel(menu->addItem(tab, &mode), gameModeLabel);
 		menu->addItem(tab, &boots);
 		menu->addItem(tab, &ammo);
+		menu->addItem(tab, &boot);
 		menu->addItem(tab, &save);
 		menu->addItem(tab, &load);
 		lastReady = lastRefresh = -1;
@@ -198,5 +306,6 @@ void moduleUpdate(void)
 	if (lastReady != ready) {
 		menu->setItemEnabled(item, ready);
 		lastReady = ready;
+	}
 	}
 }

@@ -556,7 +556,8 @@ static void draw(void)
 	if (selectedTab == homeTab) {
 		const char* region = loader->region == 1   ? "Region: NTSC-U"
 		                     : loader->region == 2 ? "Region: PAL"
-		                                           : "Region: NTSC-J";
+		                     : loader->region == 3 ? "Region: NTSC-J"
+		                                           : "Region: NTSC-K";
 		menuBackendText(.13f, .325f, 0x80ffffff, "DL Mod Menu   v" MODMENU_VERSION_STRING);
 		menuBackendText(.13f, .39f, 0x80ffffff, "Shared controls for campaign and multiplayer.");
 		menuBackendText(.13f, .435f, 0x80ffffff, "Mods add their own tabs, settings and actions.");
@@ -692,7 +693,7 @@ static void openFromPause(void)
 	previousButtons = menuBackendButtons(loader->mode);
 }
 
-void moduleUpdate(void)
+static void updateMenu(void)
 {
 	u32 buttons, pressed;
 	int level;
@@ -787,6 +788,11 @@ void moduleUpdate(void)
 		activate(0);
 	if (opened)
 		draw();
+}
+
+void moduleUpdate(void)
+{
+	menuBackendUpdate(loader->mode, updateMenu);
 }
 
 /* GCC may lower aggregate initialization to memset even in freestanding code. */

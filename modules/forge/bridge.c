@@ -1,14 +1,19 @@
 /* PINE only writes data; commands execute here on the normal module tick. */
 #include "modules/forge/include/forge.h"
 
+int forgeBootAvailable(void);
+int forgeBootRequest(void);
+u32 forgeBootState(void);
+
 /* Part of Forge's BSS and module memory size, not a loader reservation.
  * PINE follows the module discovery header and exports table; see PINE.md. */
 volatile forgeMailbox_t forgeMailbox __attribute__((aligned(16)));
 const forgeExports_t moduleExports DL_MODULE_EXPORTS = {FORGE_EXPORTS_MAGIC, 1, sizeof(forgeExports_t), &forgeMailbox};
 static u32 lastRequestId, activeRequestId;
+static int bootRequest;
 static const u8 stagingCommands = (1 << FORGE_REFRESH) | (1 << FORGE_SELECT) |
-                                 (1 << FORGE_REFRESH_SELECT) | (1 << FORGE_START_GAME) |
-                                 (1 << FORGE_SELECT_RETAIL);
+	                             (1 << FORGE_REFRESH_SELECT) | (1 << FORGE_SELECT_RETAIL) |
+	                             (1 << FORGE_START_GAME);
 static const u8 gameCommands = (1 << FORGE_RELOAD) | (1 << FORGE_REFRESH) | (1 << FORGE_SELECT) |
                               (1 << FORGE_REFRESH_SELECT) | (1 << FORGE_SELECT_RETAIL);
 
@@ -16,11 +21,14 @@ void forgeBridgeDisable(void)
 {
 	volatile forgeMailbox_t* mailbox = FORGE_MAILBOX;
 	mailbox->available = mailbox->capabilities = mailbox->context = 0;
-	if (activeRequestId) {
+	/* Entering multiplayer briefly crosses an unavailable front-end context.
+	 * Keep this one operation pending until native staging is actually ready. */
+	if (activeRequestId && !(bootRequest && forgeBootState() == FORGE_LOADING)) {
 		mailbox->state = FORGE_FAILED;
 		mailbox->error = FORGE_ERROR_INACTIVE;
 		mailbox->completedId = activeRequestId;
 		activeRequestId = 0;
+		bootRequest = 0;
 	}
 	lastRequestId = mailbox->requestId;
 	mailbox->gameMode = FORGE_MODE_CQ;
@@ -33,6 +41,7 @@ void forgeBridgeInit(void)
 	for (i = 0; i < sizeof(*mailbox) / 4; ++i)
 		((volatile u32*)mailbox)[i] = 0;
 	lastRequestId = activeRequestId = 0;
+	bootRequest = 0;
 	mailbox->magic = FORGE_MAILBOX_MAGIC;
 }
 
@@ -43,17 +52,26 @@ void forgeBridgeTick(const mapHopApi_t* hopApi)
 	u8 gameMode;
 	char name[FORGE_FILENAME_SIZE];
 	int error;
+	int bootAvailable = forgeBootAvailable();
 	++mailbox->heartbeat;
-	mailbox->available = hopApi != 0;
-	mailbox->context = hopApi ? hopApi->context() : FORGE_CONTEXT_UNAVAILABLE;
+	mailbox->available = bootAvailable || hopApi != 0;
+	mailbox->context = bootAvailable ? FORGE_CONTEXT_BOOT :
+	                   hopApi ? hopApi->context() : FORGE_CONTEXT_UNAVAILABLE;
 	mailbox->capabilities = mailbox->context == FORGE_CONTEXT_STAGING ? stagingCommands :
-	                  mailbox->context == FORGE_CONTEXT_GAME ? gameCommands : 0;
+	                  mailbox->context == FORGE_CONTEXT_GAME ? gameCommands :
+	                  mailbox->context == FORGE_CONTEXT_BOOT ? (1 << FORGE_LOCAL_PLAY) : 0;
 	if (activeRequestId) {
-		mailbox->state = hopApi ? hopApi->state() : FORGE_FAILED;
-		mailbox->error = hopApi ? hopApi->error() : FORGE_ERROR_INACTIVE;
+		if (bootRequest) {
+			mailbox->state = forgeBootState();
+			mailbox->error = mailbox->state == FORGE_FAILED ? FORGE_ERROR_LOAD : 0;
+		} else {
+			mailbox->state = hopApi ? hopApi->state() : FORGE_FAILED;
+			mailbox->error = hopApi ? hopApi->error() : FORGE_ERROR_INACTIVE;
+		}
 		if (mailbox->state == FORGE_COMPLETE || mailbox->state == FORGE_FAILED) {
 			mailbox->completedId = activeRequestId;
 			activeRequestId = 0;
+			bootRequest = 0;
 		}
 	}
 	id = mailbox->requestId;
@@ -76,7 +94,14 @@ void forgeBridgeTick(const mapHopApi_t* hopApi)
 		mailbox->rejectedId = id;
 		return;
 	}
-	error = activeRequestId ? FORGE_ERROR_BUSY : !hopApi ? FORGE_ERROR_INACTIVE : hopApi->request(command, name, gameMode);
+	if (activeRequestId)
+		error = FORGE_ERROR_BUSY;
+	else if (command == FORGE_LOCAL_PLAY)
+		error = forgeBootRequest();
+	else if (!hopApi)
+		error = FORGE_ERROR_INACTIVE;
+	else
+		error = hopApi->request(command, name, gameMode);
 	if (error) {
 		mailbox->rejectError = error;
 		mailbox->rejectedId = id;
@@ -84,10 +109,12 @@ void forgeBridgeTick(const mapHopApi_t* hopApi)
 	}
 	mailbox->acceptedId = id;
 	activeRequestId = id;
-	mailbox->state = hopApi->state();
+	bootRequest = command == FORGE_LOCAL_PLAY;
+	mailbox->state = bootRequest ? forgeBootState() : hopApi->state();
 	mailbox->error = 0;
 	if (mailbox->state == FORGE_COMPLETE || mailbox->state == FORGE_FAILED) {
 		mailbox->completedId = id;
 		activeRequestId = 0;
+		bootRequest = 0;
 	}
 }
