@@ -1,4 +1,4 @@
-/* Resident NTSC-U/PAL multiplayer SDK entry points, shared by both regions. */
+/* Verified NTSC-U multiplayer SDK entry points for the directory RPC helper. */
 #include "maploader.h"
 #include <sifrpc.h>
 #include <sifcmd.h>
@@ -8,11 +8,12 @@
 #define bindRpc    CALL(0x12a538, int (*)(SifRpcClientData_t*, int, int))
 #define callRpc    CALL(0x12a718, int (*)(SifRpcClientData_t*, int, int, void*, int, void*, int, void*, void*))
 #define rpcBusy    CALL(0x12a918, int (*)(SifRpcClientData_t*))
+#define MAP_DIRECTORY_SERVICE (0x554d4151) /* Shared with iop/mapscan. */
 
 typedef struct mapScanReply {
-	int status;
-	char name[256];
-	char pad[60];
+	/* 0x00 */ int status;
+	/* 0x04 */ char name[256];
+	/* 0x104 */ char padding[60];
 } mapScanReply_t;
 
 static SifRpcClientData_t client __attribute__((aligned(64)));
@@ -46,7 +47,7 @@ static int install(void)
 	raw = mapAlloc(size + 79);
 	if (!raw)
 		goto done;
-	aligned = (void*)(((u32)raw + 63) & ~63U);
+	aligned = (void*)(((u32)raw + 63) & ~(u32)63);
 	memset(aligned, 0, (size + 15) & ~15);
 	if (!mapReadExact(fd, aligned, size))
 		goto done;
@@ -70,7 +71,7 @@ static int install(void)
 		} /* Quarantine in-flight DMA buffers on failure. */
 	}
 	/* The 0x12c2c0 wrapper discards the result pointer. This variant
-     * forwards it to the shared implementation at 0x12bd80. */
+	 * forwards it to the shared implementation at 0x12bd80. */
 	id = CALL(0x12cbe0, int (*)(void*, int, const char*, int*))(remote, 0, 0, &result);
 	if (result < 0)
 		id = -1;
@@ -116,7 +117,7 @@ int mapDirectoryReady(void)
 			return -1;
 	}
 	memset(&client, 0, sizeof(client));
-	if (bindRpc(&client, 0x554d4151, SIF_RPC_M_NOWAIT) < 0)
+	if (bindRpc(&client, MAP_DIRECTORY_SERVICE, SIF_RPC_M_NOWAIT) < 0)
 		return -1;
 	pending = 1;
 	return 0;
@@ -133,7 +134,7 @@ int mapDirectoryPoll(char* name)
 {
 	u32 i;
 	if (rpcBusy(&client))
-		return -999;
+		return MAP_DIRECTORY_PENDING;
 	if (name) {
 		for (i = 0; i < sizeof(reply.name); ++i)
 			name[i] = reply.name[i];

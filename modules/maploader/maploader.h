@@ -5,11 +5,31 @@
 #include "modules/forge/include/forge.h"
 
 #define MAP_LIMIT (96)
+#define MAP_RETAIL_COUNT (11)
+#define MAP_DIRECTORY_PENDING (-999)
 
+typedef enum mapDirectoryCommand {
+	MAP_DIRECTORY_OPEN = 1,
+	MAP_DIRECTORY_NEXT = 2,
+	MAP_DIRECTORY_CLOSE = 3
+} mapDirectoryCommand_e;
+
+/* EE layout: name ends at 0xa1; u32 alignment adds three padding bytes. */
 typedef struct mapRecord {
-	char filename[FORGE_FILENAME_SIZE], name[32];
-	u32 version, base, wad, world, sound, radar;
+	/* 0x00 */ char filename[FORGE_FILENAME_SIZE];
+	/* 0x81 */ char name[32];
+	/* 0xa4 */ u32 version;
+	/* 0xa8 */ u32 base;
+	/* 0xac */ u32 wad;
+	/* 0xb0 */ u32 world;
+	/* 0xb4 */ u32 sound;
+	/* 0xb8 */ u32 radar;
 } mapRecord_t;
+
+typedef struct mapRetail {
+	/* 0x00 */ u32 base;
+	/* 0x04 */ u32 background;
+} mapRetail_t;
 
 typedef char MapRecordSize[(sizeof(mapRecord_t) == 188) ? 1 : -1];
 
@@ -19,8 +39,8 @@ extern int mapCount, mapSelection;
 extern int mapCatalogReady;
 extern u32 mapCatalogRevision;
 extern int mapAllowOnline;
-extern int mapHopSawLoading, mapHopResult;
-extern u32 mapSceneRequest;
+extern int mapHopResult;
+extern const mapRetail_t mapRetailMaps[MAP_RETAIL_COUNT];
 
 void mapCopyRecord(mapRecord_t* to, const mapRecord_t* from);
 int mapReadInfo(const mapRecord_t* map, char* author, char* description);
@@ -44,7 +64,7 @@ int mapScanTotal(void);
 int mapValidate(const mapRecord_t* map);
 int mapOnlineDisabled(void);
 int mapMultiplayerReady(void);
-/* 0 = unavailable, 1 = local staging, 2 = online staging. */
+/* Nonzero only while the Local Play staging screen is active. */
 int mapStaging(void);
 void mapUpdateName(void);
 int mapChooseBase(u32 base);
@@ -55,6 +75,8 @@ int mapCompareText(const char* a, const char* b);
 void mapRestoreBase(void);
 int mapHooksReady(void);
 void mapInstallHooks(void);
+void mapQuickLoadBegin(void);
+int mapQuickLoadEnabled(void);
 void mapDisableHooks(void);
 int mapLoading(void);
 void mapClearLoad(void);
@@ -62,7 +84,7 @@ void mapMessage(const char* message);
 int mapForgeActive(void);
 int mapHopInGame(void);
 int mapHopAvailable(void);
-/* Nonnegative values are catalog indices; -40 through -49 select retail bases. */
+/* Nonnegative values are catalog indices; negative values select -retailBase. */
 int mapHopRequest(int index);
 int mapStartGame(void);
 void mapHopTick(void);

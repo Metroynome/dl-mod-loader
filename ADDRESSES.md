@@ -44,3 +44,21 @@ Live NTSC-U PCSX2 verification confirms the boot menu level is -1, the five SDK
 signatures match, both expected modules initialize, and the campaign hook keeps
 the hello counter advancing after initialization. Multiplayer gameplay and
 non-US runtime transitions remain untested.
+
+## Forge mode presets (NTSC-U)
+
+The live resident `nwSetGameSetupFlagsForGameType(int)` routine is at
+`0x001608d0`, beginning with `0x27bdfff0`. Its call at `0x001608dc` targets
+`0x00160870`, which copies the 88-byte default setup at `0x00173840` to
+`0x001737e8`. The following switch handles native modes 0 through 4 and applies
+their objective/spawn flags. Its CQ and CTF cases match the decompiled routine
+in `deadlocked-proto-decomp/game_dl/network/nwObjects.cpp`.
+
+Map Loader uses this preset when a mailbox request changes the mode, transfers
+its game flags into libdl's active `GameOptions`, and synchronizes the resident
+setup before loading. These addresses have not been verified for other regions.
+
+NTSC-U Local Play staging's active object is at `*(u32*)0x011c70c8`, matching
+`*(u32*)0x011c7108` when that screen is active. Its map-name and game-mode child
+pointers are at `0xb0` and `0xb4`; each owns inline text at `0x60`. Live staging
+reads identified these as the current retail map name and "Conquest" respectively.

@@ -1,4 +1,5 @@
 #include "maploader.h"
+#include <libdl/map.h>
 
 #ifndef MAP_SEEK
 #define MAP_SEEK ((int (*)(int, int, int))0x12b740)
@@ -10,6 +11,15 @@
 #define MAP_SCAN_NATIVE_CLOCK (1)
 #endif
 
+typedef enum mapScanPhase {
+	MAP_SCAN_IDLE = 0,
+	MAP_SCAN_BIND = 1,
+	MAP_SCAN_OPEN = 2,
+	MAP_SCAN_READ = 3,
+	MAP_SCAN_INSPECT = 4,
+	MAP_SCAN_CLOSE = 5
+} mapScanPhase_e;
+
 #ifdef MAP_SCAN_NATIVE_CLOCK
 static u32 scanClock(void);
 #endif
@@ -20,11 +30,12 @@ const moduleApi_t* mapApi;
 mapRecord_t* mapRecords;
 int mapCount, mapSelection = -1;
 int mapCatalogReady;
-/* Scan work is batched within a small budget each Local Play update. */
-/* One retained allocation, refilled in place on explicit refresh. */
-static char selected[FORGE_FILENAME_SIZE];
-static int phase, candidates, current, kept, waitTicks;
 u32 mapCatalogRevision;
+/* Scan work is batched within a small budget each Local Play update.
+ * One retained allocation, refilled in place on explicit refresh. */
+static char selected[FORGE_FILENAME_SIZE];
+static mapScanPhase_e phase;
+static int candidates, current, kept, waitTicks;
 
 static int validName(const char* text, u32 size)
 {
@@ -51,9 +62,7 @@ static void append(char* dst, u32* pos, const char* src)
 int mapReadExact(int fd, void* dest, u32 size)
 {
 	u8* p = dest;
-	const forgeApi_t* forge = mapApi->findService(FORGE_SERVICE_ID, FORGE_API_VERSION);
-	int quick = forge && forge->size >= sizeof(*forge) && forge->active() &&
-	            forge->quickLoadMaps && *forge->quickLoadMaps;
+	int quick = mapQuickLoadEnabled();
 	while (size) {
 		/* Horizon requests the remaining WAD in one operation. Avoid hundreds
 		 * of EE/IOP round trips in quick mode; still handle partial reads. */
@@ -93,8 +102,8 @@ int mapReadPart(const mapRecord_t* map, const char* extension, void* dest, u32 s
 	return ok;
 }
 
-/* MP's resident seek has been checked in both regional SDK images. Campaign
- * catalogs can be read via moduleApi_t, but no campaign game-code hooks are used. */
+/* Use the verified NTSC-U multiplayer seek entry point. Campaign has no
+ * map-loading backend; the loader still owns ordinary hostfs file I/O. */
 static int sizeMatches(const mapRecord_t* map, const char* extension, u32 size)
 {
 	int fd, result;
@@ -116,15 +125,7 @@ int mapValidate(const mapRecord_t* map)
 	       sizeMatches(map, ".sound", map->sound) && sizeMatches(map, ".map", map->radar);
 }
 
-void* __attribute__((weak)) memset(void* dest, int value, u32 size)
-{
-	u8* p = dest;
-	while (size--)
-		*p++ = (u8)value;
-	return dest;
-}
-
-/* .version metadata is shared by both regions: 48-byte header, author[32],
+/* .version metadata contains a 48-byte header, author[32],
  * description[256]. Older packs may contain just the header. */
 int mapReadInfo(const mapRecord_t* map, char* author, char* description)
 {
@@ -174,7 +175,7 @@ static void copyName(char* to, const char* from)
 
 static int validRecord(const mapRecord_t* m)
 {
-	return validName(m->filename, sizeof(m->filename)) && validName(m->name, 32) && mapRetailName(m->base) != 0 &&
+	return validName(m->filename, sizeof(m->filename)) && validName(m->name, 32) && mapIdToMask(m->base) != 0 &&
 	       (m->wad || m->world) && m->wad <= 0x1000000 && m->world <= 0x400000 && m->sound <= 0x400000 &&
 	       m->radar <= 0x27400;
 }
@@ -249,7 +250,7 @@ static int inspect(mapRecord_t* m)
 
 static void finish(int error)
 {
-	phase = 0;
+	phase = MAP_SCAN_IDLE;
 	if (error) {
 		mapCount = 0;
 		mapCatalogReady = 0;
@@ -287,7 +288,7 @@ void mapScanStart(void)
 	candidates = current = kept = waitTicks = 0;
 	++mapCatalogRevision; /* Re-read descriptions even when the catalog is unchanged. */
 	mapDirectoryReset();
-	phase = 1;
+	phase = MAP_SCAN_BIND;
 }
 
 int mapScanActive(void)
@@ -302,7 +303,7 @@ int mapScanCurrent(void)
 
 int mapScanTotal(void)
 {
-	return phase == 4 ? candidates : 0;
+	return phase == MAP_SCAN_INSPECT ? candidates : 0;
 }
 
 void mapCopyRecord(mapRecord_t* to, const mapRecord_t* from)
@@ -322,56 +323,56 @@ static int scanStep(void)
 	mapRecord_t temp;
 	if (!phase)
 		return 0;
-	if (phase == 1) {
+	if (phase == MAP_SCAN_BIND) {
 		r = mapDirectoryReady();
 		if (r < 0) {
 			finish(1);
 			return -1;
 		}
 		if (r > 0) {
-			if (!mapDirectoryRequest(1)) {
+			if (!mapDirectoryRequest(MAP_DIRECTORY_OPEN)) {
 				finish(1);
 				return -1;
 			}
-			phase = 2;
+			phase = MAP_SCAN_OPEN;
 			waitTicks = 0;
 		}
 		return r > 0 ? 2 : 0;
 	}
-	if (phase == 2 || phase == 3 || phase == 5) {
+	if (phase == MAP_SCAN_OPEN || phase == MAP_SCAN_READ || phase == MAP_SCAN_CLOSE) {
 		r = mapDirectoryPoll(name);
-		if (r == -999)
+		if (r == MAP_DIRECTORY_PENDING)
 			return 0;
 		waitTicks = 0;
-		if (phase == 5) {
+		if (phase == MAP_SCAN_CLOSE) {
 			if (r < 0) {
 				finish(1);
 				return -1;
 			}
-			phase = 4;
+			phase = MAP_SCAN_INSPECT;
 			return 2;
 		}
 		if (r < 0) {
-			mapDirectoryRequest(3);
+			mapDirectoryRequest(MAP_DIRECTORY_CLOSE);
 			finish(1);
 			return -1;
 		}
-		if (phase == 3 && !r) {
-			if (!mapDirectoryRequest(3)) {
+		if (phase == MAP_SCAN_READ && !r) {
+			if (!mapDirectoryRequest(MAP_DIRECTORY_CLOSE)) {
 				finish(1);
 				return -1;
 			}
-			phase = 5;
+			phase = MAP_SCAN_CLOSE;
 			return 2;
 		}
-		if (phase == 3) {
+		if (phase == MAP_SCAN_READ) {
 			for (n = 0; name[n]; ++n)
 				;
 			if (n > 8 && n < (int)FORGE_FILENAME_SIZE + 8 && !mapCompareText(name + n - 8, ".version")) {
 				name[n - 8] = 0;
 				if (validName(name, FORGE_FILENAME_SIZE)) {
 					if (candidates == MAP_LIMIT) {
-						mapDirectoryRequest(3);
+						mapDirectoryRequest(MAP_DIRECTORY_CLOSE);
 						finish(1);
 						return -1;
 					}
@@ -379,14 +380,14 @@ static int scanStep(void)
 				}
 			}
 		}
-		if (!mapDirectoryRequest(2)) {
+		if (!mapDirectoryRequest(MAP_DIRECTORY_NEXT)) {
 			finish(1);
 			return -1;
 		}
-		phase = 3;
+		phase = MAP_SCAN_READ;
 		return 2;
 	}
-	if (phase == 4 && current < candidates) {
+	if (phase == MAP_SCAN_INSPECT && current < candidates) {
 		r = inspect(&mapRecords[current]);
 		if (r < 0) {
 			finish(1);
@@ -452,7 +453,7 @@ int mapScanTick(void)
 		if (result == -1 || result == 1)
 			return result;
 		/* Helper startup/rebind retries must still advance once per frame. */
-		if (phase == 1)
+		if (phase == MAP_SCAN_BIND)
 			break;
 		if (result == 2)
 			++steps;
@@ -468,8 +469,8 @@ void mapScanRelease(void)
 {
 	/* Never free an old multiplayer pointer through the campaign allocator. */
 	if (phase && mapApi->mode == DL_MODE_MULTIPLAYER && mapDirectoryIdle())
-		mapDirectoryRequest(3);
-	phase = 0;
+		mapDirectoryRequest(MAP_DIRECTORY_CLOSE);
+	phase = MAP_SCAN_IDLE;
 	selected[0] = 0;
 	mapFree(mapRecords);
 	mapRecords = 0;

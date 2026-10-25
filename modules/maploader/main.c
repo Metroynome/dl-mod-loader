@@ -2,31 +2,36 @@
  * file IO and game hooks live in files.c and multiplayer.c respectively. */
 #include "modules/modmenu/include/modmenu.h"
 #include "maploader.h"
-#include "modules/forge/include/forge.h"
+#include <libdl/gamesettings.h>
+#include <libdl/map.h>
 
-static u32 commandContext(void), commandState(void), commandError(void);
-static int commandRequest(u32, const char*);
+static u32 commandContext(void);
+static u32 commandState(void);
+static u32 commandError(void);
+static int commandRequest(u32, const char*, u8);
+static int setStagingGameMode(u8 gameMode);
 static int reloadMap(void);
 static const char* hopStatus(void);
 
 static const modMenuApi_t* menu;
 static int tab, dirty = 1, lastContext = -1;
 static char status[48] = "Choose a map in multiplayer staging";
-static const mapHopApi_t hopService = {FORGE_API_VERSION,
-                                       sizeof(mapHopApi_t),
-                                       mapHopAvailable,
-                                       reloadMap,
-                                       hopStatus,
-                                       commandContext,
-                                       commandRequest,
-                                       commandState,
-                                       commandError};
+static const mapHopApi_t hopService = {
+	FORGE_API_VERSION,
+	sizeof(mapHopApi_t),
+	mapHopAvailable,
+	reloadMap,
+	hopStatus,
+	commandContext,
+	commandRequest,
+	commandState,
+	commandError,
+	setStagingGameMode
+};
 /* Shared asynchronous requests; usable without a menu service. */
 static u32 jobState, jobError, jobCommand;
+static u8 jobGameMode;
 static char jobName[FORGE_FILENAME_SIZE];
-/* Merge the sorted catalog with retail names without allocating a second list.
- * Keep stable catalog indices for selection, descriptions and reloads. */
-static const u8 retailOrder[] = {41, 42, 45, 54, 53, 48, 44, 46, 51, 50, 47};
 static int lastEditable = -1;
 static int playedGame;
 
@@ -66,7 +71,7 @@ static int choose(void* context)
 	if (!mapStaging() || !mapHooksReady() || mapLoading() || index < 0 || index >= mapCount)
 		return 0;
 	if (!mapValidate(&mapRecords[index])) {
-		mapMessage("Map files changed: re-enter staging");
+		mapMessage("Map files changed; refresh custom maps");
 		return 0;
 	}
 	mapSelection = index;
@@ -77,7 +82,7 @@ static int choose(void* context)
 
 static int chooseRetail(u32 base)
 {
-	if (mapScanActive() || mapLoading() || !mapRetailName(base))
+	if (mapScanActive() || mapLoading() || !mapIdToMask(base))
 		return 0;
 	if (mapHopInGame())
 		return mapHopRequest(-(int)base);
@@ -98,7 +103,8 @@ static u32 commandContext(void)
 {
 	if (mapApi->context != DL_CONTEXT_LOCAL || !mapForgeActive() || !mapHooksReady())
 		return 0;
-	return mapStaging() == 1 ? 1 : mapHopInGame() ? 2 : 0;
+	return mapStaging() ? FORGE_CONTEXT_STAGING :
+	       mapHopInGame() ? FORGE_CONTEXT_GAME : FORGE_CONTEXT_UNAVAILABLE;
 }
 
 static void commandFinish(u32 error)
@@ -107,14 +113,53 @@ static void commandFinish(u32 error)
 	jobState = error ? FORGE_FAILED : FORGE_COMPLETE;
 }
 
+/* NTSC-U nwSetGameSetupFlagsForGameType resets the resident setup at 0x1737e8
+ * from native defaults, then applies every mode-specific flag. Use it when
+ * changing modes; a same-mode reload retains the user's existing game rules. */
+static void applyGameMode(u8 gameMode)
+{
+	GameSettings* settings = gameGetSettings();
+	GameOptions* options = gameGetOptions();
+	GameOptions* setup = (GameOptions*)0x1737e8;
+	int chargeboots = options->GameFlags.MultiplayerGameFlags.SpawnWithChargeboots;
+	int infiniteAmmo = options->GameFlags.MultiplayerGameFlags.UnlimitedAmmo;
+	u32 i;
+	if (settings->GameRules != gameMode) {
+		((void (*)(int))0x1608d0)(gameMode);
+		for (i = 0; i < sizeof(options->GameFlags.Raw); ++i)
+			options->GameFlags.Raw[i] = setup->GameFlags.Raw[i];
+		/* A native mode preset must not reset Forge's independent toggles. */
+		options->GameFlags.MultiplayerGameFlags.SpawnWithChargeboots = chargeboots;
+		options->GameFlags.MultiplayerGameFlags.UnlimitedAmmo = infiniteAmmo;
+	}
+	settings->GameRules = gameMode;
+	/* Start Game copies setup over active options. Keep both in sync while
+	 * preserving the active weapon flags, point values and upgrade timers. */
+	*setup = *options;
+}
+
+static int setStagingGameMode(u8 gameMode)
+{
+	if (gameMode > GAMERULE_JUGGY || commandContext() != FORGE_CONTEXT_STAGING ||
+	    !gameGetSettings() || !gameGetOptions() || mapLoading() ||
+	    *(volatile u32*)0x1608d0 != 0x27bdfff0)
+		return 0;
+	applyGameMode(gameMode);
+	mapUpdateName();
+	return 1;
+}
+
 static int commandSelect(void)
 {
 	int i, j;
+	if (!commandContext() || !gameGetSettings() || !gameGetOptions())
+		return FORGE_ERROR_CONTEXT;
 	if (jobCommand == FORGE_SELECT_RETAIL) {
 		if (jobName[0] < '4' || jobName[0] > '5' || jobName[1] < '0' || jobName[1] > '9' || jobName[2])
 			return FORGE_ERROR_NAME;
 		if (!chooseRetail((jobName[0] - '0') * 10 + jobName[1] - '0'))
 			return FORGE_ERROR_LOAD;
+		applyGameMode(jobGameMode);
 		jobState = mapHopInGame() ? FORGE_LOADING : FORGE_COMPLETE;
 		dirty = 1;
 		return 0;
@@ -125,6 +170,7 @@ static int commandSelect(void)
 		if (!jobName[j] && !mapRecords[i].filename[j]) {
 			if (!choose((void*)(i + 1)))
 				return FORGE_ERROR_LOAD;
+			applyGameMode(jobGameMode);
 			jobState = mapHopInGame() ? FORGE_LOADING : FORGE_COMPLETE;
 			dirty = 1;
 			return 0;
@@ -133,7 +179,7 @@ static int commandSelect(void)
 	return FORGE_ERROR_NOT_FOUND;
 }
 
-static int commandRequest(u32 command, const char* name)
+static int commandRequest(u32 command, const char* name, u8 gameMode)
 {
 	u32 context = commandContext(), i;
 	if (jobState == FORGE_SCANNING || jobState == FORGE_LOADING || mapScanActive() || mapLoading() || mapHopResult == 1)
@@ -142,9 +188,15 @@ static int commandRequest(u32 command, const char* name)
 		return FORGE_ERROR_CONTEXT;
 	if (command < FORGE_RELOAD || command > FORGE_SELECT_RETAIL)
 		return FORGE_ERROR_COMMAND;
-	if (command == FORGE_RELOAD && context != 2)
+	if (command != FORGE_REFRESH && gameMode > GAMERULE_JUGGY)
+		return FORGE_ERROR_MODE;
+	if (command != FORGE_REFRESH && (!gameGetSettings() || !gameGetOptions()))
 		return FORGE_ERROR_CONTEXT;
-	if (command == FORGE_START_GAME && context != 1)
+	if (command != FORGE_REFRESH && *(volatile u32*)0x1608d0 != 0x27bdfff0)
+		return FORGE_ERROR_LOAD;
+	if (command == FORGE_RELOAD && context != FORGE_CONTEXT_GAME)
+		return FORGE_ERROR_CONTEXT;
+	if (command == FORGE_START_GAME && context != FORGE_CONTEXT_STAGING)
 		return FORGE_ERROR_CONTEXT;
 	if (command == FORGE_SELECT || command == FORGE_REFRESH_SELECT || command == FORGE_SELECT_RETAIL) {
 		if (!name || !name[0] || name[0] == '.')
@@ -159,6 +211,7 @@ static int commandRequest(u32 command, const char* name)
 		copy(jobName, name, sizeof(jobName));
 	}
 	jobCommand = command;
+	jobGameMode = gameMode;
 	jobError = 0;
 	if (command == FORGE_REFRESH || command == FORGE_REFRESH_SELECT) {
 		mapScanStart();
@@ -168,6 +221,9 @@ static int commandRequest(u32 command, const char* name)
 	} else if (command == FORGE_RELOAD || command == FORGE_START_GAME) {
 		if (!(command == FORGE_START_GAME ? mapStartGame() : reloadMap()))
 			return FORGE_ERROR_LOAD;
+		/* The transition runs on a later tick, after its request is validated.
+		 * UI/shortcut reloads bypass this path and retain their current rules. */
+		applyGameMode(jobGameMode);
 		jobState = FORGE_LOADING;
 	} else
 		return commandSelect();
@@ -204,13 +260,22 @@ static void clear(void* context)
 	mapMessage("Retail map selected");
 }
 
+/* Merge the sorted catalog with retail names without a second allocation.
+ * Catalog indices remain stable for selection, descriptions and reloads. */
 static int retailPosition(int r)
 {
-	int c = 0;
-	const char* name = mapRetailName(retailOrder[r]);
+	int c = 0, other, position;
+	const char* name = mapRetailName(mapRetailMaps[r].base);
 	while (c < mapCount && mapCompareText(mapRecords[c].name, name) < 0)
 		++c;
-	return c + r + 1;
+	position = c + 1;
+	/* Native/localized names need not follow the default English ID order. */
+	for (other = 0; other < MAP_RETAIL_COUNT; ++other) {
+		int order = mapCompareText(mapRetailName(mapRetailMaps[other].base), name);
+		if (order < 0 || (order == 0 && other < r))
+			++position;
+	}
+	return position;
 }
 
 static int listEntry(int index)
@@ -218,18 +283,22 @@ static int listEntry(int index)
 	int r, p;
 	if (!index)
 		return -1;
-	for (r = 0; r < 11; ++r) {
-		p = retailPosition(r);
-		if (index <= p)
-			return index == p ? -retailOrder[r] : index - r - 1;
+	/* Count retail entries before this row to recover its catalog index. */
+	p = index - 1;
+	for (r = 0; r < MAP_RETAIL_COUNT; ++r) {
+		int position = retailPosition(r);
+		if (index == position)
+			return -(int)mapRetailMaps[r].base;
+		if (index > position)
+			--p;
 	}
-	return index - 12;
+	return p;
 }
 
 static int listFocus(void)
 {
 	int i, target = mapSelection < 0 ? -(int)mapCurrentBase() : mapSelection;
-	for (i = 0; i < mapCount + 12; ++i)
+	for (i = 0; i < mapCount + MAP_RETAIL_COUNT + 1; ++i)
 		if (listEntry(i) == target)
 			return i;
 	return 0;
@@ -245,8 +314,6 @@ static const char* mapLabel(void* context, int index)
 static void selectMap(void* context, int index)
 {
 	(void)context;
-	if (mapScanActive())
-		return;
 	if ((!mapStaging() && !(mapForgeActive() && mapHopInGame())) || !mapHooksReady() || mapLoading() || mapScanActive())
 		return;
 	if (!index && mapHopInGame()) {
@@ -257,6 +324,16 @@ static void selectMap(void* context, int index)
 		index = listEntry(index);
 		if (!(index < 0 ? chooseRetail(-index) : choose((void*)(index + 1))))
 			return;
+		if (mapHopInGame()) {
+			const forgeApi_t* forge = mapApi->findService(FORGE_SERVICE_ID, FORGE_API_VERSION);
+			/* UI choices stay pending until this hop. Mailbox requests use
+			 * their own mode byte and never pass through this menu callback. */
+			if (forge && forge->version == FORGE_API_VERSION && forge->size >= sizeof(*forge) &&
+			    forge->active() && forge->gameMode && *forge->gameMode >= FORGE_MODE_CQ &&
+			    *forge->gameMode <= FORGE_MODE_JUGGY && gameGetSettings() && gameGetOptions() &&
+			    *(volatile u32*)0x1608d0 == 0x27bdfff0)
+				applyGameMode(*forge->gameMode);
+		}
 	} else
 		clear(0);
 	menu->close();
@@ -335,7 +412,7 @@ static void browseRetailMaps(void* context)
 	(void)context;
 	if (mapScanActive() || !mapHooksReady() || mapLoading())
 		return;
-	menu->setList(tab, mapCount + 12, mapLabel, selectMap, 0, listFocus());
+	menu->setList(tab, mapCount + MAP_RETAIL_COUNT + 1, mapLabel, selectMap, 0, listFocus());
 	menu->setListInfo(tab, mapInfo);
 }
 
@@ -363,7 +440,7 @@ static int rebuild(int context)
 			ok &= menu->setTabAction(tab, "REFRESH", refreshMaps, 0) == 0;
 		if (editable) {
 			if (mapCount) {
-				ok &= menu->setList(tab, mapCount + 12, mapLabel, selectMap, 0, listFocus()) == 0;
+				ok &= menu->setList(tab, mapCount + MAP_RETAIL_COUNT + 1, mapLabel, selectMap, 0, listFocus()) == 0;
 				ok &= menu->setListInfo(tab, mapInfo) == 0;
 			} else {
 				ok &= add(mapCatalogReady ? "No custom maps found" : status, MODMENU_LABEL, 0, 0, 1);
@@ -414,7 +491,7 @@ int moduleInit(const moduleApi_t* api)
 	mapApi = api;
 	api->setLifecycle(0, deactivate);
 	/* Explicit opt-in for a future server without Horizon. Missing/invalid
-     * configuration remains disabled; read once at boot. */
+	 * configuration remains disabled; read once at boot. */
 	{
 		char flag = 0;
 		int fd = api->open("host0:dl/maploader-online.txt", 1, 0);

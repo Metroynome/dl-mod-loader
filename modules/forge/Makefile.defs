@@ -1,5 +1,5 @@
 # Module settings; shared build rules are in ../../Makefile.eeglobal.
-LIBRARY = none
+LIBRARY = libdl
 MODE = multiplayer
 REGIONS = ntscu
 EE_OBJS = main.o bridge.o

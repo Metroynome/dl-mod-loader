@@ -23,6 +23,14 @@ opt-in and is not currently included by the release module allowlist. See the
   Forge → Reload Current Map. Works with retail and custom maps.
 - **Change maps:** choose a named map in the in-game Custom Maps list and press
   Cross. The menu closes and a normal loading transition begins.
+- **Game Mode:** starts with the mode chosen for this game. Scroll left/right
+  through the named modes. In staging, the mode label/settings update immediately
+  and Start Game uses that choice. During gameplay, Reload Current Map, the
+  reload shortcut, or an in-game map hop applies the pending choice.
+- **Chargeboots / Infinite Ammo:** separate toggles, both on by default. Forge
+  enforces their game-rule values in staging and gameplay, across starts, reloads
+  and hops. Turn them off in Forge to disable them. Chargeboots uses the game's
+  Spawn With Chargeboots rule, which grants them when the player spawns.
 - **Refresh Custom Maps:** use the Forge tab in staging or supported gameplay
   after changing map files. Refresh updates the catalog; it does not reload the
   current level. Without Forge, restart to discover changes.
@@ -30,7 +38,9 @@ opt-in and is not currently included by the release module allowlist. See the
 Retail and custom maps share an alphabetical list. `None` is staging-only;
 choose a named retail entry to leave a custom map during gameplay. The in-game
 list is available only while Forge is active. L3 + R3 remains disabled during
-gameplay; no reload button combo is implemented.
+gameplay. Press **L1 + D-pad Up + Circle** during gameplay to reload the current
+map without opening Mod Menu. The shortcut works with retail and custom maps,
+is disabled while menus/loading are active, and triggers once per press.
 
 Hops use the existing game session and settings, with player recreation and HUD
 setup. They are full loading transitions, not seamless geometry updates or a
@@ -38,11 +48,15 @@ promise to preserve transient player state, scores, or timers.
 
 ## External commands
 
-Forge's tab includes **Quick Load Maps**, **Save Settings**, and **Load Settings**.
-Quick Load Maps defaults to off. Save Settings writes the current value to
+Forge's tab includes **Quick Load Maps**, **Game Mode**, **Save Settings**, and **Load Settings**.
+Quick Load Maps defaults to off. When enabled, it bypasses loading VSync only
+for custom-map starts, hops, and reloads. Retail maps retain normal VSync.
+Save Settings writes Quick Load Maps, the pending mode choice, and both toggles to
 `host0:dl/config/forge.ntscu.ini`; Load Settings restores it. Saved settings are
-also loaded when Forge initializes, without requiring Mod Menu. If no file
-exists, the default remains in use.
+also loaded when Forge initializes, without requiring Mod Menu. Loading settings
+changes the mode immediately in staging, or queues it during gameplay; the two
+toggles apply immediately. Each new game starts with its own chosen mode.
+Defaults are Quick Load off, Chargeboots on, and Infinite Ammo on.
 
 The module-owned mailbox accepts:
 
@@ -66,20 +80,17 @@ memory writes; actual editor-side PINE transport still needs integration testing
 
 ## Support and limitations
 
-- Local Play staging and gameplay base overlays **40–49**, NTSC-U/PAL.
-- No campaign, online, NTSC-J, or split-screen hopping.
+- NTSC-U Deadlocked Local Play staging and the retail bases listed in [PINE.md](PINE.md).
+- No campaign, online, PAL, NTSC-J, or split-screen hopping support yet.
 - No automatic file watching, build-triggered reload, or position restoration.
-- Map assets must pass Map Loader validation. Do not update files during a scan
-  or load. A failure after teardown may require restarting the game.
-- Mod Menu is optional for commands; Map Loader is required. Unavailable
-  dependencies disable actions rather than enabling unsupported transitions.
+- Finish writing map files before scanning or loading. A failure after teardown
+  may require restarting the game.
+- Mod Menu is optional for commands and the reload shortcut; Map Loader is required.
 
-Live NTSC-U tests covered Temple of Shaar reloads, hops to Bakisi Mini, repeated
-reloads, retail Korgon Outpost, and return hops with working gameplay/HUD.
-PAL tests covered Bakisi Isles and Aquatos Aquadome starts/reloads and hops in
-both directions, including the corrected custom loading-screen name.
-Temple of Shaar's PAL normal-start and hop crashes remain unresolved. Other map
-bases/player counts are not all live-qualified. See [ADDRESSES.md](../../docs/ADDRESSES.md).
+Live NTSC-U tests covered Hoven Gorge and Metropolis, retail Battledome Tower
+and Catacrom Graveyard, repeated reloads, and returning to staging. Gameplay,
+HUD, minimaps, loading-screen names/backgrounds, and the reload shortcut were
+checked. Other maps and player counts still need individual verification.
 
 ## Ownership
 
@@ -102,8 +113,6 @@ These are ideas, not implemented features:
 - **Automatic update detection:** prefer explicit completed-build notifications
   over periodic scans. A revision marker or optional slow scan could support
   older exporters. Changed size/version alone cannot detect every content edit.
-- **Optional reload shortcut:** consume its gameplay inputs and trigger only once
-  per press. Horizon Deadlocked uses L1 + Up + Circle; no DL shortcut is assigned.
 
 For editor export, agree on a complete-build handoff with region, base map,
 stable filename, build ID, and asset sizes/hashes. Publish readiness only after
@@ -117,4 +126,5 @@ not a proposed replacement protocol.
 
 Map filename stems now accept up to 128 ASCII characters (plus the NUL terminator).
 Update Forge, Map Loader, and `mods/utils/mapscan.irx` together, then cold-boot.
-External clients must use [PINE protocol v2](PINE.md); the v1 field offsets are incompatible.
+External clients must use [PINE protocol v3](PINE.md); earlier field offsets are incompatible. The mailbox no longer contains version/size
+fields, and accepts an optional game-mode byte (CQ by default).

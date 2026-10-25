@@ -3,6 +3,7 @@
 #include "maploader.h"
 #include <libdl/game.h>
 #include <libdl/gamesettings.h>
+#include <libdl/map.h>
 
 #define WORD(address) (*(volatile u32*)(address))
 #define JAL(address) (0x0c000000 | ((u32)(address) >> 2))
@@ -28,11 +29,25 @@ static void menuSoundInit(void);
 static void gameMusicInit(void);
 static void menuMusicInit(void);
 static u64 hookedDiscLoad(u64 a0, u64 a1, u64 a2, u64 a3, u64 t0, u64 t1, u64 t2);
-static void quickLoadBegin(void);
 static void quickLoadEnd(void);
 
+/* Alphabetical display order; background indices follow the resident disc table. */
+const mapRetail_t mapRetailMaps[MAP_RETAIL_COUNT] = {
+	{MAP_ID_BATTLEDOME, 0},
+	{MAP_ID_CATACROM, 1},
+	{MAP_ID_DC, 3},
+	{MAP_ID_GS, 10},
+	{MAP_ID_MARAXUS, 9},
+	{MAP_ID_MF, 6},
+	{MAP_ID_SARATHOS, 2},
+	{MAP_ID_SHAAR, 4},
+	{MAP_ID_TEMPUS, 8},
+	{MAP_ID_TORVAL, 7},
+	{MAP_ID_VALIX, 5}
+};
+
 int mapAllowOnline;
-u32 mapSceneRequest;
+static char retailNames[MAP_RETAIL_COUNT][32];
 static int busy, overrideActive, hostLoaded, soundLoaded, originalBase = -1;
 static void* soundBuffer;
 static u32 previewStaging, previewBase;
@@ -60,20 +75,24 @@ static loadHook_t hooks[] = {
 
 const char* mapRetailName(u32 base)
 {
-	switch (base) {
-	case 41: return "Battledome Tower";
-	case 42: return "Catacrom Graveyard";
-	case 44: return "Sarathos Swamp";
-	case 45: return "Dark Cathedral";
-	case 46: return "Temple of Shaar";
-	case 47: return "Valix Lighthouse";
-	case 48: return "Mining Facility";
-	case 50: return "Torval Ruins";
-	case 51: return "Tempus Station";
-	case 53: return "Maraxus Prison";
-	case 54: return "Ghost Station";
-	default: return 0;
+	u32 i;
+	for (i = 0; i < MAP_RETAIL_COUNT; ++i) {
+		if (mapRetailMaps[i].base == base) {
+			/* libdl's help lookup returns NULL during scene loading. Preserve
+			 * its text in module memory before the source string table is reused. */
+			const char* name = mapGetName(base);
+			if (name && name[0]) {
+				u32 n = 0;
+				while (name[n] && n + 1 < sizeof(retailNames[i])) {
+					retailNames[i][n] = name[n];
+					++n;
+				}
+				retailNames[i][n] = 0;
+			}
+			return retailNames[i];
+		}
 	}
+	return 0;
 }
 
 int mapMultiplayerReady(void)
@@ -106,7 +125,7 @@ u32 mapCurrentBase(void)
 int mapChooseBase(u32 base)
 {
 	GameSettings* settings = gameGetSettings();
-	if (!mapStaging() || !settings || !mapRetailName(base))
+	if (!mapStaging() || !settings || !mapIdToMask(base))
 		return 0;
 	if (originalBase < 0)
 		originalBase = settings->GameLevel;
@@ -132,11 +151,22 @@ void mapRestoreBase(void)
 	originalBase = -1;
 }
 
+/* Local Play text widgets own a 32-byte inline label at 0x60. */
+static void stagingText(u32 label, const char* text)
+{
+	int i;
+	if (!label || !text)
+		return;
+	for (i = 0; i < 31 && text[i]; ++i)
+		((char*)label)[0x60 + i] = text[i];
+	((char*)label)[0x60 + i] = 0;
+}
+
 void mapUpdateName(void)
 {
-	u32 staging, label;
+	u32 staging;
 	const char* name;
-	int i;
+	GameSettings* settings;
 	if (!mapStaging())
 		return;
 	staging = WORD(0x11c70c8);
@@ -147,17 +177,13 @@ void mapUpdateName(void)
 		previewStaging = staging;
 		previewBase = mapCurrentBase();
 	}
-	/* NTSC-U Local Play: child 0 is the map-name text element.
-	 * Its inline text starts at 0x60, independently of online staging. */
-	label = WORD(staging + 0xb0);
-	if (!label)
-		return;
+	/* NTSC-U Local Play children 0/1 are the map/mode text elements,
+	 * independently of the online staging layout. */
 	name = mapSelection >= 0 && mapSelection < mapCount ? mapRecords[mapSelection].name : mapRetailName(mapCurrentBase());
-	if (!name)
-		return;
-	for (i = 0; i < 31 && name[i]; ++i)
-		((char*)label)[0x60 + i] = name[i];
-	((char*)label)[0x60 + i] = 0;
+	stagingText(WORD(staging + 0xb0), name);
+	settings = gameGetSettings();
+	if (settings)
+		stagingText(WORD(staging + 0xb4), gameGetGameModeName(settings->GameRules));
 }
 
 int mapLoading(void)
@@ -180,9 +206,8 @@ static void hookedTable(u32 start, u32 count, u8* dest, u32 level)
 {
 	mapRecord_t* map = selectedMap();
 	if (level && map)
-		quickLoadBegin();
+		mapQuickLoadBegin();
 	((void (*)(u32, u32, void*))0x159a00)(start, count, dest);
-	mapSceneRequest = level;
 	mapClearLoad();
 	if (map && (level == map->base || level == map->base + 20) && !mapOnlineDisabled()) {
 		overrideActive = 1;
@@ -318,6 +343,23 @@ static void hookedBackground(u64 a0, void* dest, u32 start, u32 count, u64 t0, u
 		if (ok)
 			return;
 	}
+	/* The source overlay passes its old background during a hop. Resolve the
+	 * destination through the same resident disc table as the native loader.
+	 * Keep the caller's buffer capacity as an upper bound. */
+	if (mapHopResult == 1 && !mapOnlineDisabled()) {
+		u32 i, base = mapCurrentBase();
+		for (i = 0; i < MAP_RETAIL_COUNT; ++i) {
+			if (mapRetailMaps[i].base == base) {
+				u32 offset = mapRetailMaps[i].background * 8;
+				u32 sectors = WORD(0x1ce41c + offset);
+				if (sectors && sectors <= count) {
+					start = WORD(0x1ce40c) + WORD(0x1ce418 + offset);
+					count = sectors;
+				}
+				break;
+			}
+		}
+	}
 	((void (*)(u64, void*, u32, u32, u64, u64, u64))0x163808)(a0, dest, start, count, t0, t1, t2);
 }
 
@@ -338,23 +380,25 @@ static u64 hookedDiscLoad(u64 a0, u64 a1, u64 a2, u64 a3, u64 t0, u64 t1, u64 t2
 	return result;
 }
 
-static void quickLoadBegin(void)
+void mapQuickLoadBegin(void)
 {
-	const forgeApi_t* forge = mapApi->findService(FORGE_SERVICE_ID, FORGE_API_VERSION);
-	u32 i;
-	if (!forge || forge->size < sizeof(*forge) || !forge->active() ||
-	    !forge->quickLoadMaps || !*forge->quickLoadMaps)
+	u32 i, previous = quickLoadPatched;
+	if (!mapQuickLoadEnabled())
 		return;
-	/* Horizon's menu-overlay loading loops. Never patch these addresses in
-	 * another overlay: they contain unrelated gameplay instructions/data. */
+	/* These are menu-overlay loading loops. The early fade occurs before
+	 * the level table is read, so enable them as soon as loading begins. */
+	if (WORD(0x747f28) != 0x27bdff80 || WORD(0x5cfb48) != JAL(menuLoad))
+		return;
 	for (i = 0; i < sizeof(quickLoadSites) / sizeof(quickLoadSites[0]); ++i) {
 		if (WORD(quickLoadSites[i]) == JAL(0x138d70)) {
 			WORD(quickLoadSites[i]) = 0;
 			quickLoadPatched |= 1 << i;
 		}
 	}
-	mapApi->flushCache(0);
-	mapApi->flushCache(2);
+	if (quickLoadPatched != previous) {
+		mapApi->flushCache(0);
+		mapApi->flushCache(2);
+	}
 }
 
 static void quickLoadEnd(void)
@@ -379,7 +423,9 @@ void mapInstallHooks(void)
 	int changed = 0;
 	if (!mapMultiplayerReady() || mapOnlineDisabled())
 		return;
-	if (isInGame() && mapHopResult != 1)
+	if (isSceneLoading() && selectedMap())
+		mapQuickLoadBegin();
+	if (!selectedMap() || (isInGame() && mapHopResult != 1))
 		quickLoadEnd();
 	for (i = 0; i < sizeof(hooks) / sizeof(hooks[0]); ++i) {
 		loadHook_t* hook = &hooks[i];
