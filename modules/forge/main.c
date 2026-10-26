@@ -25,7 +25,7 @@ static void gameModeChanged(void* unused);
 
 static const moduleApi_t* loader;
 static const modMenuApi_t* menu;
-static int enabled, tab, item, refreshItem, freecamItem, lastReady = -1, lastRefresh = -1;
+static int enabled, tab, item, refreshItem, lastReady = -1, lastRefresh = -1;
 static int modeItem;
 static int quickLoadMaps, reloadHeld = 1;
 static int selectedGameMode, lastGameContext = -1;
@@ -45,7 +45,7 @@ static const moduleConfigField_t settings[] = {
 	{"freecamLockPosition", &forgeFreecam.lockPosition, 0, 1},
 	{"freecamLockAnimation", &forgeFreecam.lockAnimation, 0, 1}
 };
-static const forgeApi_t service = {FORGE_API_VERSION, sizeof(forgeApi_t), active, &quickLoadMaps, &selectedGameMode};
+static const forgeApi_t service = {FORGE_API_VERSION, sizeof(forgeApi_t), active, &quickLoadMaps, &selectedGameMode, forgeFreecamReset};
 
 static int active(void)
 {
@@ -279,6 +279,8 @@ static void updateMenu(int ready, int canRefresh)
 	static const modMenuItem_t boots = {"Chargeboots", MODMENU_TOGGLE, &chargeboots, 0, 1, 1, applyGameOptions, 0};
 	static const modMenuItem_t ammo = {"Infinite Ammo", MODMENU_TOGGLE, &infiniteAmmo, 0, 1, 1, applyGameOptions, 0};
 	static const modMenuItem_t boot = {"Boot to Local Play", MODMENU_TOGGLE, &bootToLocalPlay, 0, 1, 1, 0, 0};
+	static const modMenuItem_t gameHeader = {"Game Settings", MODMENU_HEADER, 0, 0, 0, 0, 0, 0};
+	static const modMenuItem_t freecamHeader = {"Free Cam Settings", MODMENU_HEADER, 0, 0, 0, 0, 0, 0};
 	static const modMenuItem_t freecam = {"Free Cam", MODMENU_TOGGLE, &forgeFreecam.enabled, 0, 1, 1, 0, 0};
 	static const modMenuItem_t freecamHelp = {"L1 + \x1d: toggle free cam in game", MODMENU_LABEL, 0, 0, 0, 0, 0, 0};
 	static const modMenuItem_t airwalk = {"Free Cam Airwalk", MODMENU_TOGGLE, &forgeFreecam.airwalk, 0, 1, 1, 0, 0};
@@ -298,13 +300,15 @@ static void updateMenu(int ready, int canRefresh)
 		menu->setTabContexts(tab, DL_CONTEXT_CAMPAIGN | DL_CONTEXT_LOCAL);
 		item = menu->addItem(tab, &action);
 		refreshItem = menu->addItem(tab, &refreshAction);
+		menu->addItem(tab, &boot);
 		menu->addItem(tab, &quickLoad);
+		menu->addItem(tab, &gameHeader);
 		modeItem = menu->addItem(tab, &mode);
 		menu->setItemValueLabel(modeItem, gameModeLabel);
 		menu->addItem(tab, &boots);
 		menu->addItem(tab, &ammo);
-		menu->addItem(tab, &boot);
-		freecamItem = menu->addItem(tab, &freecam);
+		menu->addItem(tab, &freecamHeader);
+		menu->addItem(tab, &freecam);
 		menu->addItem(tab, &freecamHelp);
 		menu->addItem(tab, &airwalk);
 		menu->addItem(tab, &lockPosition);
@@ -313,7 +317,6 @@ static void updateMenu(int ready, int canRefresh)
 		menu->addItem(tab, &load);
 		lastReady = lastRefresh = -1;
 	}
-	menu->setItemEnabled(freecamItem, forgeFreecamAvailable());
 	menu->setItemEnabled(modeItem, loader->mode == DL_MODE_MULTIPLAYER);
 	if (lastRefresh != canRefresh) {
 		menu->setItemEnabled(refreshItem, canRefresh);

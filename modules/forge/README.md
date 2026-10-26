@@ -62,8 +62,9 @@ promise to preserve transient player state, scores, or timers.
 
 Free Cam is enabled by default. In an NTSC-U Local Play game, close Mod Menu,
 then press **L1 + D-pad Up** to enter/exit. Enabling the option arms the shortcut;
-it does not immediately move the camera. Free Cam is unavailable in staging,
-campaign, or online play. Native camera hooks must match the supported overlay.
+it does not immediately move the camera. Its preference can be changed in staging;
+the camera itself activates only during gameplay. It is unavailable in
+campaign or online play. Native camera hooks must match the supported overlay.
 
 | Control | Action |
 | --- | --- |
@@ -89,7 +90,9 @@ than freezing an animation frame. These are debug tools, not invulnerability.
 
 The HUD and reticle are hidden while the free camera is active. Exit restores
 the saved HUD flags, camera offset/orientation, input timer, and previous occlusion
-value. Square triggers once per press; Select + Square only restores the bookmark. Camera movement
+value. Map Loader calls Forge before player teardown to release camera input/hooks
+for every start, reload and hop. Update Forge and Map Loader together.
+Square triggers once per press; Select + Square only restores the bookmark. Camera movement
 and shortcuts pause while Mod Menu or the normal pause menu is open. Death ends
 that player's camera session. Reloading, hopping, leaving gameplay, or module
 deactivation ends the active camera session and clears camera bookmarks, while preserving the enabled preference.
@@ -99,8 +102,15 @@ and Lock Animation. Free Cam defaults to ON; the other three default to OFF.
 A saved preference overrides these defaults. Camera bookmarks remain in memory only. The unrelated
 L1 + D-pad Up + Circle reload shortcut still works and does not toggle Free Cam.
 Free Cam supports NTSC-U Local Play; split-screen has not been live-qualified.
+NTSC-U Hoven Gorge testing confirmed the section headings and scrolling, plus
+repeated shortcut reloads with Free Cam active: movement, HUD and controls
+returned normally after each reload.
 Other memory-card mods can overwrite occlusion or camera state. Disable conflicting
 patch.bin mods when testing Render All.
+
+The Forge tab uses centered **Game Settings** and **Free Cam Settings** headings,
+matching Horizon DL's white text. The item viewport stays still until selection
+reaches its top or bottom edge; headings are not selectable.
 
 ## External commands
 

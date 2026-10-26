@@ -72,6 +72,7 @@ typedef struct forgeApi {
 	/* 0x08 */ int (*active)(void);
 	/* 0x0c */ const int* quickLoadMaps;
 	/* 0x10 */ const int* gameMode; /* Current/pending UI mode, initialized from the game. */
+	/* 0x14 */ void (*prepareTransition)(void); /* Release module input/hooks before player teardown. */
 } forgeApi_t;
 
 /* Requests execute asynchronously. reload() retains the mode and returns positive

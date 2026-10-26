@@ -126,7 +126,8 @@ and release hooks/input/UI through the lifecycle callbacks before deactivation.
 Modules can use services and INI persistence without depending on Mod Menu.
 Public interfaces live in [include/module.h](include/module.h) and each module's
 `include/` folder. The shared menu supports named left/right range choices via
-`setItemValueLabel`.
+`setItemValueLabel`. Use `MODMENU_HEADER` for centered, nonselectable section
+headings. Item lists retain their viewport until selection crosses a visible edge.
 
 ## Memory and debugging
 

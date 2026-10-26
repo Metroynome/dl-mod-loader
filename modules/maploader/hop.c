@@ -311,7 +311,15 @@ void mapHopTick(void)
 		return;
 	if (queued) {
 		int startGame = queued == 2;
+		const forgeApi_t* forge = mapForgeApi();
 		queued = 0;
+		if (!forge) {
+			mapHopCancel();
+			return;
+		}
+		/* Free Cam must release the old player's input before hop() rebuilds it. */
+		if (forge->prepareTransition)
+			forge->prepareTransition();
 		if (startGame) {
 			if (!mapStaging() || mapApi->context != DL_CONTEXT_LOCAL || WORD(0x747f28) != 0x27bdff80) {
 				mapHopCancel();

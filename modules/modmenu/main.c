@@ -21,6 +21,7 @@ typedef struct tab {
 	/* 0x68 */ char actionLabel[24];
 	/* 0x80 */ ModMenuCallback action;
 	/* 0x84 */ void* actionContext;
+	/* 0x88 */ int firstRow;
 } tab_t;
 
 typedef struct item {
@@ -165,6 +166,7 @@ static int addTab(const char* key, const char* label, u32 modes)
 		return -1;
 	tabs[freeSlot].handle = nextHandle++;
 	tabs[freeSlot].modes = modes;
+	tabs[freeSlot].firstRow = 0;
 	tabs[freeSlot].contexts = MODMENU_SHOW_EVERYWHERE;
 	tabs[freeSlot].executionContexts = DL_CONTEXT_ALL;
 	copyText(tabs[freeSlot].key, k, 32);
@@ -178,7 +180,7 @@ static int addItem(int tab, const modMenuItem_t* d)
 	char label[48];
 	if (tabIndex(tab) < 0 || !d || !copyText(label, d->label, sizeof(label)))
 		return -1;
-	if (d->type < MODMENU_ACTION || d->type > MODMENU_LABEL)
+	if (d->type < MODMENU_ACTION || d->type > MODMENU_HEADER)
 		return -1;
 	if (d->type == MODMENU_ACTION && !d->callback)
 		return -1;
@@ -399,7 +401,7 @@ static void selectItem(int direction)
 	for (i = 0; i < MODMENU_MAX_ITEMS; ++i) {
 		index = (index + direction + MODMENU_MAX_ITEMS) % MODMENU_MAX_ITEMS;
 		if (items[index].handle && items[index].tab == selectedTab && items[index].enabled &&
-		    items[index].definition.type != MODMENU_LABEL) {
+		    items[index].definition.type != MODMENU_LABEL && items[index].definition.type != MODMENU_HEADER) {
 			selectedItem = items[index].handle;
 			return;
 		}
@@ -612,8 +614,14 @@ static void draw(void)
 				selectedRow = row;
 			++row;
 		}
-	if (selectedRow >= 8)
-		start = selectedRow - 7;
+	/* Scroll only when the selection moves beyond the visible rows. */
+	if (index >= 0) {
+		if (selectedRow < tabs[index].firstRow)
+			tabs[index].firstRow = selectedRow;
+		else if (selectedRow >= tabs[index].firstRow + 8)
+			tabs[index].firstRow = selectedRow - 7;
+		start = tabs[index].firstRow;
+	}
 	row = 0;
 	for (i = 0; i < MODMENU_MAX_ITEMS; ++i)
 		if (items[i].handle && items[i].tab == selectedTab) {
@@ -629,6 +637,11 @@ static void draw(void)
 				/* Keep standard controls inside the same .11..89 content pane
                  * used by the home tab and custom-map list. */
 				menuBackendBox(.115f, y - .008f, .77f, .052f, 0x80606060);
+			}
+			if (items[i].definition.type == MODMENU_HEADER) {
+				/* Horizon DL uses centered, full-white section labels. */
+				menuBackendText(.5f - menuBackendWidth(items[i].label) * .5f, y, 0x80ffffff, items[i].label);
+				continue;
 			}
 			if (items[i].definition.type == MODMENU_ACTION) {
 				/* Horizon config.c button: inset dark border, gray face, centered
