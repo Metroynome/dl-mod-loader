@@ -2,4 +2,4 @@
 LIBRARY = libdl
 MODE = both
 REGIONS = ntscu
-EE_OBJS = main.o bridge.o
+EE_OBJS = main.o bridge.o freecam.o

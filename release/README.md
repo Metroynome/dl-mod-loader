@@ -31,6 +31,12 @@ Boot to Local Play defaults to OFF, so the game boots normally. PINE can enter
 staging on demand. Chargeboots and Infinite Ammo default to ON; Quick Load Maps
 defaults to OFF and only bypasses VSync for custom-map starts, hops and reloads.
 Press L1 + D-pad Up + Circle during gameplay to reload once per press.
+Forge's Free Cam defaults to ON: press L1 + D-pad Up in a Local Play game
+to enter/exit. Square toggles Render All; L1/R1 select fast/slow movement.
+Free Cam and its Airwalk/lock preferences can be saved; camera bookmarks are
+not saved. Other patch.bin mods can conflict with camera/occlusion behavior.
+The Forge tab appears at boot and in Local Play, and stays hidden in campaign.
+PINE Enter Local Play also accepts requests during the boot intro/preview.
 Save/Load Settings uses `dl/config/forge.ntscu.ini`; existing INI choices win.
 
 Offline modules deactivate online so Horizon can take over. NTSC-U tests covered

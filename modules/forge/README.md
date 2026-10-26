@@ -58,6 +58,50 @@ Hops use the existing game session and settings, with player recreation and HUD
 setup. They are full loading transitions, not seamless geometry updates or a
 promise to preserve transient player state, scores, or timers.
 
+## Free Cam
+
+Free Cam is enabled by default. In an NTSC-U Local Play game, close Mod Menu,
+then press **L1 + D-pad Up** to enter/exit. Enabling the option arms the shortcut;
+it does not immediately move the camera. Free Cam is unavailable in staging,
+campaign, or online play. Native camera hooks must match the supported overlay.
+
+| Control | Action |
+| --- | --- |
+| Left stick | Move the camera forward/back and sideways |
+| Right stick | Look using the game's camera speed and inversion settings |
+| Hold L1 | Move faster (2.0; default 0.5) |
+| Hold R1 | Move slower (0.12); holding both uses default speed |
+| Hold L3 | Keep left-stick movement horizontal |
+| L2 / R2 | Move down / up |
+| D-pad Left | Switch between camera control and character control |
+| D-pad Right | Toggle whether the character uses the free camera's orientation |
+| D-pad Down | Hide/show the control legend |
+| Square | Toggle occlusion (OFF renders geometry normally hidden by occlusion) |
+| Select + Triangle | Remember the camera position and direction in memory |
+| Select + Square | Restore that in-memory camera bookmark |
+| D-pad Up | Capture/release the current character state when Lock Animation is enabled |
+
+The Forge tab also provides **Free Cam Airwalk**, **Free Cam Lock Position**,
+and **Free Cam Lock Animation**, matching Horizon's debug options. Airwalk resets
+the character's off-ground timers while Free Cam is armed. Position lock holds
+the character at the captured position; animation lock holds its state rather
+than freezing an animation frame. These are debug tools, not invulnerability.
+
+The HUD and reticle are hidden while the free camera is active. Exit restores
+the saved HUD flags, camera offset/orientation, input timer, and previous occlusion
+value. Square triggers once per press; Select + Square only restores the bookmark. Camera movement
+and shortcuts pause while Mod Menu or the normal pause menu is open. Death ends
+that player's camera session. Reloading, hopping, leaving gameplay, or module
+deactivation ends the active camera session and clears camera bookmarks, while preserving the enabled preference.
+
+Forge's Save/Load Settings buttons include Free Cam, Airwalk, Lock Position,
+and Lock Animation. Free Cam defaults to ON; the other three default to OFF.
+A saved preference overrides these defaults. Camera bookmarks remain in memory only. The unrelated
+L1 + D-pad Up + Circle reload shortcut still works and does not toggle Free Cam.
+Free Cam supports NTSC-U Local Play; split-screen has not been live-qualified.
+Other memory-card mods can overwrite occlusion or camera state. Disable conflicting
+patch.bin mods when testing Render All.
+
 ## External commands
 
 Forge's tab includes **Quick Load Maps**, **Game Mode**, **Save Settings**, and **Load Settings**.
@@ -74,7 +118,7 @@ The module-owned mailbox accepts:
 
 | Command | Purpose |
 | --- | --- |
-| Enter Local Play | Enter staging from the boot menu without enabling automatic boot |
+| Enter Local Play | Enter staging from the boot intro/preview or menu without enabling automatic boot |
 | Refresh | Rescan available map packs |
 | Select/load filename | Select in staging; hop during gameplay |
 | Refresh and select/load | Rescan before selection/hopping |

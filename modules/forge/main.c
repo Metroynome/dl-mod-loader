@@ -1,6 +1,7 @@
 /* Forge boot and Local Play controls. Map Loader owns map transitions. */
 #include "modules/forge/include/forge.h"
 #include "modules/modmenu/include/modmenu.h"
+#include "freecam.h"
 #include <libdl/game.h>
 #include <libdl/gamesettings.h>
 #include <libdl/pad.h>
@@ -8,6 +9,7 @@
 
 typedef enum forgeBootStage {
 	FORGE_BOOT_INITIAL,
+	FORGE_BOOT_PENDING,
 	FORGE_BOOT_MULTIPLAYER,
 	FORGE_BOOT_CREATE,
 	FORGE_BOOT_STAGING,
@@ -23,7 +25,8 @@ static void gameModeChanged(void* unused);
 
 static const moduleApi_t* loader;
 static const modMenuApi_t* menu;
-static int enabled, tab, item, refreshItem, lastReady = -1, lastRefresh = -1;
+static int enabled, tab, item, refreshItem, freecamItem, lastReady = -1, lastRefresh = -1;
+static int modeItem;
 static int quickLoadMaps, reloadHeld = 1;
 static int selectedGameMode, lastGameContext = -1;
 static int chargeboots = 1, infiniteAmmo = 1;
@@ -36,7 +39,11 @@ static const moduleConfigField_t settings[] = {
 	{"gameMode", &selectedGameMode, FORGE_MODE_CQ, FORGE_MODE_JUGGY},
 	{"chargeboots", &chargeboots, 0, 1},
 	{"infiniteAmmo", &infiniteAmmo, 0, 1},
-	{"bootToLocalPlay", &bootToLocalPlay, 0, 1}
+	{"bootToLocalPlay", &bootToLocalPlay, 0, 1},
+	{"freecam", &forgeFreecam.enabled, 0, 1},
+	{"freecamAirwalk", &forgeFreecam.airwalk, 0, 1},
+	{"freecamLockPosition", &forgeFreecam.lockPosition, 0, 1},
+	{"freecamLockAnimation", &forgeFreecam.lockAnimation, 0, 1}
 };
 static const forgeApi_t service = {FORGE_API_VERSION, sizeof(forgeApi_t), active, &quickLoadMaps, &selectedGameMode};
 
@@ -57,6 +64,20 @@ static void bootLocalPlay(void)
 		return;
 	}
 	if (loader->mode == DL_MODE_CAMPAIGN) {
+		if (bootStage == FORGE_BOOT_PENDING) {
+			/* Startup flags work before the boot UI exists. If it is already
+			 * playing a movie, defer the callback until BootMain is ready. */
+			*(volatile u8*)0x21de69 = 1;
+			*(volatile u32*)0x21de80 = 0;
+			*(volatile u32*)0x21edbc = 1;
+			if (*(volatile u8*)0x306dc0 && *(volatile int*)0x306dc4 == 32 &&
+			    *(volatile u32*)0x4a20c8 == 0x27bdfff0 &&
+			    *(volatile u32*)0x4a20d8 == 0x0c126c68) {
+				bootStage = FORGE_BOOT_MULTIPLAYER;
+				((void (*)(void*))0x4a20c8)(0);
+			}
+			return;
+		}
 		if (bootStage == FORGE_BOOT_INITIAL && *(volatile int*)0x21de10 == -1) {
 			*(volatile u8*)0x21de69 = 1; /* Boot into the multiplayer UI. */
 			*(volatile u32*)0x21de80 = 0; /* eNWLobbyInitToMain, never Online. */
@@ -65,6 +86,8 @@ static void bootLocalPlay(void)
 		}
 		return;
 	}
+	if (bootStage == FORGE_BOOT_PENDING)
+		bootStage = FORGE_BOOT_MULTIPLAYER;
 	if (!active() || *(volatile int*)0x21de10 != 0 || *(volatile u32*)0x22026c != 1)
 		return;
 	current = uiGetActivePointer();
@@ -97,10 +120,6 @@ int forgeBootAvailable(void)
 	int level = *(volatile int*)0x21de10;
 	return enabled && loader->mode == DL_MODE_CAMPAIGN &&
 	       (level == -1 || (level == 1 && *(volatile int*)0x1711a8 == -1)) &&
-	       *(volatile u8*)0x306dc0 && /* Boot menu is active, not an intro/preview movie. */
-	       *(volatile int*)0x306dc4 == 32 && /* GuiMenu_PlayerData[0].iScreen: BootMain. */
-	       *(volatile u32*)0x4a20c8 == 0x27bdfff0 &&
-	       *(volatile u32*)0x4a20d8 == 0x0c126c68 &&
 	       (bootStage == FORGE_BOOT_INITIAL || bootStage == FORGE_BOOT_DONE);
 }
 
@@ -119,10 +138,8 @@ int forgeBootRequest(void)
 		currentMenu->close();
 	bootRequested = 1;
 	bootResult = FORGE_LOADING;
-	bootStage = FORGE_BOOT_MULTIPLAYER;
-	/* BootMain_CMDMultiCB queues the native Multiplayer screen. Startup
-	 * flags alone no longer take effect once BootMain is already open. */
-	((void (*)(void*))0x4a20c8)(0);
+	bootStage = FORGE_BOOT_PENDING;
+	bootLocalPlay();
 	return 0;
 }
 
@@ -130,10 +147,13 @@ int forgeBootRequest(void)
  * resident setup synchronized because Start Game copies it into active options. */
 static void applyGameOptions(void* unused)
 {
-	GameOptions* options = gameGetOptions();
+	GameOptions* options;
 	GameOptions* setup = (GameOptions*)0x1737e8;
 	(void)unused;
-	if (!active() || !gameGetSettings() || !options)
+	if (!active())
+		return;
+	options = gameGetOptions();
+	if (!gameGetSettings() || !options)
 		return;
 	options->GameFlags.MultiplayerGameFlags.SpawnWithChargeboots = chargeboots;
 	options->GameFlags.MultiplayerGameFlags.UnlimitedAmmo = infiniteAmmo;
@@ -167,6 +187,8 @@ static const char* gameModeLabel(void* context, int index)
 {
 	const char* name;
 	(void)context;
+	if (loader->mode != DL_MODE_MULTIPLAYER)
+		return "Local Play only";
 	name = gameGetGameModeName(index);
 	return name ? name : "Unavailable";
 }
@@ -215,6 +237,7 @@ static void activate(void)
 
 static void deactivate(void)
 {
+	forgeFreecamReset();
 	enabled = 0;
 	reloadHeld = 1;
 	if (bootResult == FORGE_LOADING && *(volatile u32*)0x1af91c) {
@@ -235,6 +258,7 @@ int moduleInit(const moduleApi_t* api)
 	forgeBridgeInit();
 	if (api->version < DL_API_VERSION || api->size < sizeof(*api))
 		return -1;
+	forgeFreecamInit(api);
 	api->loadConfig("forge", settings, sizeof(settings) / sizeof(settings[0]));
 	api->restrictContexts(DL_CONTEXT_CAMPAIGN | DL_CONTEXT_LOCAL);
 	api->setLifecycle(activate, deactivate);
@@ -244,16 +268,8 @@ int moduleInit(const moduleApi_t* api)
 	return api->publishService(FORGE_SERVICE_ID, FORGE_API_VERSION, &service);
 }
 
-void moduleUpdate(void)
+static void updateMenu(int ready, int canRefresh)
 {
-	bootLocalPlay();
-	if (loader->mode != DL_MODE_MULTIPLAYER) {
-		forgeBridgeTick(0);
-		return; /* No libdl menu/player calls in campaign or the boot overlay. */
-	}
-	{
-	const mapHopApi_t* hopApi = hop();
-	int ready = hopApi && hopApi->available();
 	static const modMenuItem_t action = {"Reload Current Map", MODMENU_ACTION, 0, 0, 0, 0, reload, 0};
 	static const modMenuItem_t refreshAction = {"Refresh Custom Maps", MODMENU_ACTION, 0, 0, 0, 0, refresh, 0};
 	static const modMenuItem_t quickLoad = {"Quick Load Maps", MODMENU_TOGGLE, &quickLoadMaps, 0, 1, 1, 0, 0};
@@ -263,8 +279,64 @@ void moduleUpdate(void)
 	static const modMenuItem_t boots = {"Chargeboots", MODMENU_TOGGLE, &chargeboots, 0, 1, 1, applyGameOptions, 0};
 	static const modMenuItem_t ammo = {"Infinite Ammo", MODMENU_TOGGLE, &infiniteAmmo, 0, 1, 1, applyGameOptions, 0};
 	static const modMenuItem_t boot = {"Boot to Local Play", MODMENU_TOGGLE, &bootToLocalPlay, 0, 1, 1, 0, 0};
+	static const modMenuItem_t freecam = {"Free Cam", MODMENU_TOGGLE, &forgeFreecam.enabled, 0, 1, 1, 0, 0};
+	static const modMenuItem_t freecamHelp = {"L1 + \x1d: toggle free cam in game", MODMENU_LABEL, 0, 0, 0, 0, 0, 0};
+	static const modMenuItem_t airwalk = {"Free Cam Airwalk", MODMENU_TOGGLE, &forgeFreecam.airwalk, 0, 1, 1, 0, 0};
+	static const modMenuItem_t lockPosition = {"Free Cam Lock Position", MODMENU_TOGGLE, &forgeFreecam.lockPosition, 0, 1, 1, 0, 0};
+	static const modMenuItem_t lockAnimation = {"Free Cam Lock Animation", MODMENU_TOGGLE, &forgeFreecam.lockAnimation, 0, 1, 1, 0, 0};
 	static const modMenuItem_t save = {"Save Settings", MODMENU_ACTION, 0, 0, 0, 0, configAction, (void*)1};
 	static const modMenuItem_t load = {"Load Settings", MODMENU_ACTION, 0, 0, 0, 0, configAction, 0};
+	if (!menu)
+		menu = modmenuFind(loader);
+	if (!menu)
+		return;
+	if (tab <= 0) {
+		tab = menu->addTab("forge", "Forge", DL_MODE_BOTH);
+		if (tab <= 0)
+			return;
+		menu->setTabVisibility(tab, MODMENU_SHOW_MAIN_MENU | MODMENU_SHOW_MULTIPLAYER);
+		menu->setTabContexts(tab, DL_CONTEXT_CAMPAIGN | DL_CONTEXT_LOCAL);
+		item = menu->addItem(tab, &action);
+		refreshItem = menu->addItem(tab, &refreshAction);
+		menu->addItem(tab, &quickLoad);
+		modeItem = menu->addItem(tab, &mode);
+		menu->setItemValueLabel(modeItem, gameModeLabel);
+		menu->addItem(tab, &boots);
+		menu->addItem(tab, &ammo);
+		menu->addItem(tab, &boot);
+		freecamItem = menu->addItem(tab, &freecam);
+		menu->addItem(tab, &freecamHelp);
+		menu->addItem(tab, &airwalk);
+		menu->addItem(tab, &lockPosition);
+		menu->addItem(tab, &lockAnimation);
+		menu->addItem(tab, &save);
+		menu->addItem(tab, &load);
+		lastReady = lastRefresh = -1;
+	}
+	menu->setItemEnabled(freecamItem, forgeFreecamAvailable());
+	menu->setItemEnabled(modeItem, loader->mode == DL_MODE_MULTIPLAYER);
+	if (lastRefresh != canRefresh) {
+		menu->setItemEnabled(refreshItem, canRefresh);
+		lastRefresh = canRefresh;
+	}
+	if (lastReady != ready) {
+		menu->setItemEnabled(item, ready);
+		lastReady = ready;
+	}
+}
+
+void moduleUpdate(void)
+{
+	bootLocalPlay();
+	if (loader->mode != DL_MODE_MULTIPLAYER) {
+		forgeFreecamUpdate(0, 0);
+		forgeBridgeTick(0);
+		updateMenu(0, 0);
+		return; /* Menu API is shared; libdl gameplay calls stay multiplayer-only. */
+	}
+	{
+	const mapHopApi_t* hopApi = hop();
+	int ready = hopApi && hopApi->available();
 	int canRefresh = hopApi && hopApi->context() && hopApi->state() != FORGE_SCANNING && hopApi->state() != FORGE_LOADING;
 	int context = hopApi ? hopApi->context() : FORGE_CONTEXT_UNAVAILABLE;
 	GameSettings* current = gameGetSettings();
@@ -280,32 +352,8 @@ void moduleUpdate(void)
 		menu->close();
 	if (!menu)
 		menu = modmenuFind(loader);
+	forgeFreecamUpdate(menu && menu->isOpen(), hopApi && hopApi->state() == FORGE_LOADING);
 	reloadShortcut(hopApi);
-	if (!menu)
-		return;
-	if (tab <= 0) {
-		tab = menu->addTab("forge", "Forge", DL_MODE_MULTIPLAYER);
-		if (tab <= 0)
-			return;
-		menu->setTabContexts(tab, DL_CONTEXT_LOCAL);
-		item = menu->addItem(tab, &action);
-		refreshItem = menu->addItem(tab, &refreshAction);
-		menu->addItem(tab, &quickLoad);
-		menu->setItemValueLabel(menu->addItem(tab, &mode), gameModeLabel);
-		menu->addItem(tab, &boots);
-		menu->addItem(tab, &ammo);
-		menu->addItem(tab, &boot);
-		menu->addItem(tab, &save);
-		menu->addItem(tab, &load);
-		lastReady = lastRefresh = -1;
-	}
-	if (lastRefresh != canRefresh) {
-		menu->setItemEnabled(refreshItem, canRefresh);
-		lastRefresh = canRefresh;
-	}
-	if (lastReady != ready) {
-		menu->setItemEnabled(item, ready);
-		lastReady = ready;
-	}
+	updateMenu(ready, canRefresh);
 	}
 }

@@ -9,7 +9,7 @@ normal game-thread update. No editor source changes are included here.
 Enable `forge campaign,local`, `maploader local`, and optionally `modmenu` in modules.txt.
 The protocol works without Mod Menu. Currently supported: NTSC-U Deadlocked Local Play
 staging and the retail base IDs listed below. Command 1 can enter Local Play
-from the boot menu. Online, loaded campaign levels and transitions do not accept
+from the boot intro/preview or boot menu. Online, loaded campaign levels and transitions do not accept
 new commands; map commands also require staging or a running Local Play game.
 
 ## Quick guide: send a command
@@ -50,8 +50,10 @@ resubmit a Start Game or hop with a new ID while its outcome is unknown.
 ### Enter Local Play when automatic boot is off
 
 1. Enable Forge for `campaign,local` and cold-boot with `bootToLocalPlay=0`.
-   Press Start to dismiss the intro and show the Campaign/Multiplayer menu.
-   The command is not advertised during an intro or preview movie.
+   You can send the command during the boot intro/preview or at the
+   Campaign/Multiplayer menu. Wait for Forge's mailbox and capability bit first.
+   The request uses startup flags, deferring the native menu callback until safe;
+   it does not change the saved automatic-boot preference.
 2. Discover the mailbox. Require context `3` and capability bit `0x02`.
 3. Send **command `1` (`FORGE_LOCAL_PLAY`)**, empty filename, using the normal
    payload-first/request-ID-last procedure. The game-mode byte is ignored.
