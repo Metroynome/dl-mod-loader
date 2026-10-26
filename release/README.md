@@ -36,6 +36,11 @@ to enter/exit. Square toggles Render All; L1/R1 select fast/slow movement.
 Free Cam and its Airwalk/lock preferences can be saved; camera bookmarks are
 not saved. Other patch.bin mods can conflict with camera/occlusion behavior.
 The Forge tab appears at boot and in Local Play, and stays hidden in campaign.
+Game Settings and Free Cam Settings headings use Horizon DL's white text.
+Scrolling only moves the viewport when selection crosses a visible edge.
+Free Cam can be armed in staging but only activates during gameplay. Forge
+and Map Loader release camera input/hooks before starts, reloads and hops
+recreate the player. Upgrade Forge, Map Loader and Mod Menu together.
 PINE Enter Local Play also accepts requests during the boot intro/preview.
 Save/Load Settings uses `dl/config/forge.ntscu.ini`; existing INI choices win.
 
