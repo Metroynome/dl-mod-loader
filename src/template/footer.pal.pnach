@@ -1,0 +1,13 @@
+// Entry wrappers leave Horizon's return hook intact.
+patch=1,EE,E0050000,extended,001399E8
+patch=1,EE,E004FFB0,extended,001399EA
+patch=1,EE,E0030100,extended,001399EC
+patch=1,EE,E0023C11,extended,001399EE
+patch=1,EE,201399E0,extended,@CAMPAIGN@
+patch=1,EE,201399E4,extended,00000000
+patch=1,EE,E0050010,extended,00138D78
+patch=1,EE,E004FFBF,extended,00138D7A
+patch=1,EE,E003E138,extended,00138D7C
+patch=1,EE,E0020C04,extended,00138D7E
+patch=1,EE,20138D70,extended,@MULTIPLAYER@
+patch=1,EE,20138D74,extended,00000000

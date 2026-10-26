@@ -1,0 +1,63 @@
+#include "modules/modmenu/include/modmenu.h"
+
+static const moduleApi_t* loader;
+static int registered, enabled, amount = 5;
+static const moduleConfigField_t settings[] = {{"enabled", &enabled, 0, 1}, {"amount", &amount, 0, 10}};
+static const modMenuApi_t* registeredMenu;
+
+static void deactivate(void)
+{
+	if (registeredMenu && registered)
+		registeredMenu->removeTab(registered);
+	registered = 0;
+	registeredMenu = 0;
+}
+
+static void action(void* context)
+{
+	(void)context;
+	loader->print("menu-example: action, enabled=%d amount=%d mode=%u\n", enabled, amount, loader->mode);
+}
+
+static void configAction(void* saving)
+{
+	int result =
+	    saving ? loader->saveConfig("menu-example", settings, 2) : loader->loadConfig("menu-example", settings, 2);
+	loader->print("menu-example: %s settings result=%d\n", saving ? "save" : "load", result);
+}
+
+int moduleInit(const moduleApi_t* api)
+{
+	loader = api;
+	if (api->version < DL_API_VERSION || api->size < sizeof(*api))
+		return -1;
+	api->loadConfig("menu-example", settings, 2);
+	api->setLifecycle(0, deactivate);
+	return 0;
+}
+
+void moduleUpdate(void)
+{
+	const modMenuApi_t* menu;
+	int tab;
+	modMenuItem_t toggle = {"Example toggle", MODMENU_TOGGLE, &enabled, 0, 0, 0, action, 0};
+	modMenuItem_t range = {"Example value", MODMENU_RANGE, &amount, 0, 10, 1, action, 0};
+	modMenuItem_t save = {"Save settings", MODMENU_ACTION, 0, 0, 0, 0, configAction, (void*)1};
+	modMenuItem_t load = {"Load settings", MODMENU_ACTION, 0, 0, 0, 0, configAction, 0};
+	if (registered)
+		return;
+	menu = modmenuFind(loader);
+	if (!menu)
+		return; /* Load-order independent. */
+	tab = menu->addTab("menu-example", "Example Mod", DL_MODE_BOTH);
+	if (tab < 0)
+		return;
+	if (menu->addItem(tab, &toggle) < 0 || menu->addItem(tab, &range) < 0 || menu->addItem(tab, &save) < 0 ||
+	    menu->addItem(tab, &load) < 0) {
+		menu->removeTab(tab);
+		return;
+	}
+	menu->setTabContexts(tab, DL_CONTEXT_CAMPAIGN | DL_CONTEXT_LOCAL);
+	registered = tab;
+	registeredMenu = menu;
+}
