@@ -2,5 +2,5 @@
 #define MODMENU_VERSION_H
 
 /* Menu release version, independent of the public service ABI version. */
-#define MODMENU_VERSION_STRING "0.1.0-dev"
+#define MODMENU_VERSION_STRING "1.0.0"
 #endif

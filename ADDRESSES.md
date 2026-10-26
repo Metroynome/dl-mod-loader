@@ -21,6 +21,14 @@ modules. This preserves drawing timing while leaving Horizon's return hook at
 `0x00138dfc` intact. PNACH templates check nearby original instructions before
 installing either entry wrapper.
 
+After an NTSC-U Horizon logout, the patch can leave its map callbacks installed.
+Map Loader recognizes the first 64 callback bytes using the hashes in
+`horizonHooks` and replaces those calls only in confirmed Local Play. It also
+restores the loading-screen return, mode-name copy, and map-initialization call
+when their known Horizon callbacks match. Retail return instructions at
+`0x00706c74` (menus) and `0x0062e524` (game) were checked in extracted code5.
+Unknown patch builds are left intact. Online execution never reclaims these hooks.
+
 The five SDK signatures above and both entry prologues were compared against
 all four extracted retail cores. No regional entry addresses were inferred.
 Runtime mode filtering selects one wrapper; unknown level IDs defer updates.

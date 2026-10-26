@@ -27,7 +27,7 @@ static int enabled, tab, item, refreshItem, lastReady = -1, lastRefresh = -1;
 static int quickLoadMaps, reloadHeld = 1;
 static int selectedGameMode, lastGameContext = -1;
 static int chargeboots = 1, infiniteAmmo = 1;
-static int bootToLocalPlay = 1;
+static int bootToLocalPlay;
 static int bootRequested;
 static forgeState_e bootResult;
 static forgeBootStage_e bootStage;

@@ -1,0 +1,4 @@
+# region serial CRC mode supported
+ntscu SCUS-97465 9BFBCD42 both yes
+pal SCES-53285 D697D204 campaign yes
+ntscj SCPS-15100 2EC9DA96 campaign yes

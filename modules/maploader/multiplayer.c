@@ -72,6 +72,13 @@ static loadHook_t hooks[] = {
 	{0x62ce04, JAL(0x163808), hookedBackground},
 	{0x163814, JAL(0x163840), hookedDiscLoad}
 };
+/* First-64-byte callback hashes captured from the NTSC-U Horizon patch.
+ * Zero means Horizon does not replace this call. Unknown builds stay intact. */
+static const u32 horizonHooks[] = {
+	0x80c918e3, 0x8f349ad3, 0x9daddfaf, 0x417e75e4, 0x479ede62,
+	0x8f349ad3, 0x9daddfaf, 0x417e75e4, 0x479ede62, 0xb60b24e8,
+	0, 0, 0, 0, 0x0919c468, 0x0919c468, 0xfbdbd749
+};
 
 const char* mapRetailName(u32 base)
 {
@@ -417,10 +424,22 @@ static void quickLoadEnd(void)
 	mapApi->flushCache(2);
 }
 
+static int horizonCall(u32 instruction, u32 opcode, u32 expected)
+{
+	u32 address = (instruction & 0x03ffffff) << 2;
+	u32 hash = 2166136261, i;
+	if (!expected || (instruction & 0xfc000000) != opcode || address < 0xd0000 || address > 0xfffc0)
+		return 0;
+	for (i = 0; i < 64; ++i)
+		hash = (hash ^ *(volatile u8*)(address + i)) * 16777619;
+	return hash == expected;
+}
+
 void mapInstallHooks(void)
 {
 	u32 i;
 	int changed = 0;
+	int local = mapApi->context == DL_CONTEXT_LOCAL;
 	if (!mapMultiplayerReady() || mapOnlineDisabled())
 		return;
 	if (isSceneLoading() && selectedMap())
@@ -429,8 +448,30 @@ void mapInstallHooks(void)
 		quickLoadEnd();
 	for (i = 0; i < sizeof(hooks) / sizeof(hooks[0]); ++i) {
 		loadHook_t* hook = &hooks[i];
-		if (WORD(hook->address) == hook->original) {
+		/* Horizon remains resident after logout. Replace only its identified
+		 * map callbacks, after Local Play is positively detected. Installing
+		 * ours directly also prevents its loader from reclaiming retail calls. */
+		if (WORD(hook->address) == hook->original ||
+		    (local && horizonCall(WORD(hook->address), 0x0c000000, horizonHooks[i]))) {
 			WORD(hook->address) = JAL(hook->replacement);
+			changed = 1;
+		}
+	}
+	if (local) {
+		u32 draw = isInGame() ? 0x62e524 : 0x706c74;
+		u32 modeName = isInGame() ? 0x62d0ec : 0x70583c;
+		/* Restore the native loading-screen return and mode label. These
+		 * extra Horizon hooks have no standalone replacement. */
+		if (horizonCall(WORD(draw), 0x08000000, 0x4995e31e) && WORD(draw + 4) == 0x27bd0040) {
+			WORD(draw) = 0x03e00008;
+			changed = 1;
+		}
+		if (horizonCall(WORD(modeName), 0x0c000000, 0x023bef6e)) {
+			WORD(modeName) = JAL(0x11a9ec);
+			changed = 1;
+		}
+		if (horizonCall(WORD(0x4a8180), 0x0c000000, 0x43a502f6)) {
+			WORD(0x4a8180) = JAL(0x4ea128);
 			changed = 1;
 		}
 	}

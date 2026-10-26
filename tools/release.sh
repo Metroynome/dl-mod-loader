@@ -41,7 +41,7 @@ for label in ntscu pal ntscj all; do
 	cp tools/horizon/horizon_unix_update_cmaps.sh tools/horizon/horizon_windows_update_cmaps.ps1 "$bundle/"
 	printf '0\n' > "$bundle/dl/maploader-online.txt"
 	printf '# Release defaults: no test/example modules.\n# Restart the game after editing. See README.md.\n' > "$bundle/dl/config/modules.txt"
-	if [ "$label" != ntscj ]; then cp hostfs/dl/mods/utils/mapscan.irx "$bundle/dl/mods/utils/"; fi
+	if [ "$label" = ntscu ] || [ "$label" = all ]; then cp hostfs/dl/mods/utils/mapscan.irx "$bundle/dl/mods/utils/"; fi
 	for region in $regions; do
 		case "$region" in ntscu) id=1;; pal) id=2;; ntscj) id=3;; esac
 		while read -r r serial crc mode supported; do
@@ -56,7 +56,7 @@ for label in ntscu pal ntscj all; do
 			supported=$(printf '%s\n' "$row" | cut -d'|' -f5)
 			case " $supported " in *" $region "*) ;; *) continue;; esac
 			cp "hostfs/dl/mods/$name.$region.bin" "$bundle/dl/mods/"
-			[ "$region" != ntscj ] || contexts=campaign
+			[ "$region" = ntscu ] || contexts=campaign
 			printf '%s.%s %s\n' "$name" "$region" "$contexts" >> "$bundle/dl/config/modules.txt"
 		done < release/modules.txt
 	done

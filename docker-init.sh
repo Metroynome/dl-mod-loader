@@ -8,7 +8,7 @@ command -v "${EE_PREFIX:-ee-}gcc" >/dev/null
 
 LIBRAC4_DIR=${LIBRAC4_DIR:-/opt/dl-mod-loader-deps/librac4}
 LIBDL_DIR=${LIBDL_DIR:-/opt/dl-mod-loader-deps/libdl}
-LIBRAC4_REF=${LIBRAC4_REF:-56c3b26c16436986ab6502ee50724216f518e591}
+LIBRAC4_REF=${LIBRAC4_REF:-da7a976a0709c8d8bc8b079f4586845c79c0765d}
 LIBDL_REF=${LIBDL_REF:-3cb909efb6379ea23c0ab6f964ff62f70b63a579}
 export LIBRAC4_DIR LIBDL_DIR
 

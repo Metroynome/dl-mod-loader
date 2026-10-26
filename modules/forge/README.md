@@ -1,5 +1,9 @@
 # Forge
 
+NTSC-U online handoff was tested through Horizon patch loading/menu use, logout
+to Local Play, and PINE Hoven Gorge selection, Start Game and reload. The offline
+modules deactivate online; their map commands become available again after logout.
+
 Forge currently provides Local Play map-testing controls for NTSC-U Deadlocked. It uses Map
 Loader to reload or change maps without leaving the current game. No changes
 to Horizon Forge v2 are included; its developer can integrate the documented
@@ -7,7 +11,8 @@ to Horizon Forge v2 are included; its developer can integrate the documented
 
 ## Setup and use
 
-Build/copy Forge and its dependencies, then enable:
+Forge and its dependencies are enabled in the NTSC-U release. For a custom
+module list, use:
 
 ```text
 modmenu local
@@ -15,8 +20,7 @@ maploader local
 forge campaign,local
 ```
 
-Restart emulation after installing binaries or changing `modules.txt`. Forge is
-opt-in and is not currently included by the release module allowlist. See the
+Restart emulation after installing binaries or changing `modules.txt`. See the
 [root build instructions](../../README.md#build-with-docker).
 
 - **Reload Current Map:** open MOD MENU from the in-game pause menu, then choose
@@ -27,7 +31,7 @@ opt-in and is not currently included by the release module allowlist. See the
   through the named modes. In staging, the mode label/settings update immediately
   and Start Game uses that choice. During gameplay, Reload Current Map, the
   reload shortcut, or an in-game map hop applies the pending choice.
-- **Boot to Local Play:** on by default. Save Settings to retain the toggle,
+- **Boot to Local Play:** off by default. Save Settings to retain the toggle,
   then cold-boot to apply it. Forge skips into multiplayer, follows the native
   Local Play/Create Game path, and stops at staging without starting the game.
   It runs once per boot; exiting multiplayer later does not redirect you again.
@@ -41,7 +45,7 @@ opt-in and is not currently included by the release module allowlist. See the
   Spawn With Chargeboots rule, which grants them when the player spawns.
 - **Refresh Custom Maps:** use the Forge tab in staging or supported gameplay
   after changing map files. Refresh updates the catalog; it does not reload the
-  current level. Without Forge, restart to discover changes.
+  current level. Without Forge, press Square on Custom Maps in Local Play staging.
 
 Retail and custom maps share an alphabetical list. `None` is staging-only;
 choose a named retail entry to leave a custom map during gameplay. The in-game
@@ -64,7 +68,7 @@ Save Settings writes the boot option, Quick Load Maps, the mode choice and both 
 also loaded when Forge initializes, without requiring Mod Menu. Loading settings
 changes the mode immediately in staging, or queues it during gameplay; the two
 toggles apply immediately. Each new game starts with its own chosen mode.
-Defaults are Boot to Local Play on, Quick Load off, Chargeboots on, and Infinite Ammo on.
+Defaults are Boot to Local Play off, Quick Load off, Chargeboots on, and Infinite Ammo on.
 
 The module-owned mailbox accepts:
 

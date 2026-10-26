@@ -42,8 +42,9 @@ loader chooses their runtime addresses and performs relocation.
 
 ## Install in PCSX2
 
-1. Enable cheats and copy the loader PNACH contents into the cheat file matching
-   the CRC reported by PCSX2. The tested NTSC-U Deadlocked CRC is `9BFBCD42`.
+1. Extract a release ZIP and copy its regional PNACH into PCSX2's cheats folder.
+   Enable DL Mod Loader. NTSC-U Deadlocked uses `SCUS-97465_9BFBCD42.pnach`.
+   For source builds, use the contents of `build/dist/mod-loader.<region>.pnach`.
 2. Enable host filesystem access and copy `hostfs/dl/` into the emulator's host
    root. With an ISO in `D:/PS2/ISOs`, that is normally `D:/PS2/ISOs/dl/`.
 3. Edit `dl/config/modules.txt`, then fully restart without a savestate.
@@ -63,6 +64,8 @@ Contexts are `campaign`, `local`, `online`, or comma-separated combinations.
 `disabled` prevents loading. Legacy numeric modes remain accepted: 0 disabled,
 1 campaign, 2 multiplayer, 3 both. A module may further restrict its contexts.
 Default gameplay modules stay inactive online so Horizon can take over.
+Release defaults enable Forge on NTSC-U, with automatic Boot to Local Play OFF.
+PINE can enter staging on demand. Existing INI settings take precedence.
 
 Entries may omit `.bin` and the region: `forge` selects the current region;
 `forge.ntscu` selects that exact binary. Files stay directly in `dl/mods/`.
@@ -136,7 +139,7 @@ The optional exception handler loads from `dl/mods/debug/exceptionhandler.bin`
 at `0x00098000`, reserving `0x6000` bytes. Remove that file to disable it and
 restart. Do not combine patches that overwrite the loader or module memory.
 
-The existing GitHub workflow builds release ZIPs from `release/` policy files.
-Release packaging still needs verified DL regional CRC policy and the map-updater
-assets expected by `tools/release.sh`; those inputs are not yet present in this
-port. Development builds and installation above do not depend on them.
+Run `make release` to build the NTSC-U, PAL, NTSC-J and combined ZIPs;
+`make check-release` validates their contents and checksums. The GitHub release
+workflow runs the same steps. NTSC-K builds are available from source, but no
+CRC-verified Korean package is included. See [release instructions](release/README.md).
