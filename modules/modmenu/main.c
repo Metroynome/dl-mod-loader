@@ -1,10 +1,9 @@
-/* Offline menu core. Other modules own gameplay behavior; this module owns
- * registration, selection, input and drawing. No Horizon/server state is used. */
+/* Shared menu core. Other modules own gameplay behavior; this module owns
+ * registration, selection, input and drawing. No server connection is needed. */
 #include "modules/modmenu/include/modmenu.h"
 #include "backend.h"
 #include "version.h"
 
-/* EE layouts; host pointer sizes are different. */
 typedef struct tab {
 	/* 0x00 */ int handle;
 	/* 0x04 */ u32 modes;
@@ -31,6 +30,10 @@ typedef struct item {
 	/* 0x0c */ char label[48];
 	/* 0x3c */ modMenuItem_t definition;
 	/* 0x5c */ ModMenuListLabel valueLabel;
+	/* 0x60 */ int buttonCount;
+	/* 0x64 */ int buttonCursor;
+	/* 0x68 */ char buttonLabels[MODMENU_MAX_ROW_BUTTONS][24];
+	/* 0xc8 */ modMenuButton_t buttons[MODMENU_MAX_ROW_BUTTONS];
 } item_t;
 
 static int setTabVisibility(int tab, u32 contexts);
@@ -40,6 +43,9 @@ static int addItem(int tab, const modMenuItem_t* d);
 static int removeTab(int tab);
 static int setItemEnabled(int handle, int enabled);
 static int setItemValueLabel(int handle, ModMenuListLabel label);
+static int setItemButtons(int handle, const modMenuButton_t* buttons, int count);
+static int itemShown(const item_t* item);
+static void selectItem(int direction);
 static int isOpen(void);
 static void closeMenu(void);
 static int getActiveTab(void);
@@ -59,7 +65,7 @@ static int homeTab;
 static char progressLabel[64];
 static int progressCurrent, progressTotal, progressPulse;
 static int nextHandle = 1, opened, selectedTab, selectedItem, lastLevel = -999;
-static u32 previousButtons, previousMode, closingButtons;
+static u32 previousButtons, previousMode, previousContext, closingButtons;
 static const modMenuApi_t menuApi = {
 	MODMENU_API_VERSION,
 	sizeof(modMenuApi_t),
@@ -82,7 +88,8 @@ static const modMenuApi_t menuApi = {
 	menuBackendBox,
 	menuBackendText,
 	setTabAction,
-	setItemValueLabel
+	setItemValueLabel,
+	setItemButtons
 };
 /* A window of whole tabs: measured text plus Horizon-style padding. Scroll
  * the first visible tab only when the focused tab would fall outside it. */
@@ -125,8 +132,8 @@ static int visible(int tab)
 {
 	int i = tabIndex(tab), level = menuBackendLevel();
 	u32 context = loader->mode == DL_MODE_MULTIPLAYER
-	                           ? (level == 39 ? MODMENU_SHOW_MAIN_MENU : MODMENU_SHOW_MULTIPLAYER)
-	                           : (level < 0 ? MODMENU_SHOW_MAIN_MENU : MODMENU_SHOW_CAMPAIGN);
+	                  ? (level == 39 ? MODMENU_SHOW_MAIN_MENU : MODMENU_SHOW_MULTIPLAYER)
+	                  : (level < 0 ? MODMENU_SHOW_MAIN_MENU : MODMENU_SHOW_CAMPAIGN);
 	return i >= 0 && (tabs[i].modes & loader->mode) && (tabs[i].contexts & context) &&
 	       (tabs[i].executionContexts & loader->context);
 }
@@ -154,7 +161,7 @@ static int addTab(const char* key, const char* label, u32 modes)
 {
 	int i, freeSlot = -1;
 	char k[32], l[32];
-	if (!copyText(k, key, sizeof(k)) || !copyText(l, label, sizeof(l)) || !modes || (modes & ~(u32)3))
+	if (!copyText(k, key, sizeof(k)) || !copyText(l, label, sizeof(l)) || !modes || (modes & ~3))
 		return -1;
 	for (i = 0; i < MODMENU_MAX_TABS; ++i) {
 		if (tabs[i].handle && equal(tabs[i].key, k))
@@ -178,9 +185,13 @@ static int addItem(int tab, const modMenuItem_t* d)
 {
 	int i;
 	char label[48];
-	if (tabIndex(tab) < 0 || !d || !copyText(label, d->label, sizeof(label)))
+	if (tabIndex(tab) < 0 || !d || !d->label)
 		return -1;
-	if (d->type < MODMENU_ACTION || d->type > MODMENU_HEADER)
+	if (d->type == MODMENU_BUTTON_ROW && !*d->label)
+		label[0] = 0;
+	else if (!copyText(label, d->label, sizeof(label)))
+		return -1;
+	if (d->type < MODMENU_ACTION || d->type > MODMENU_BUTTON_ROW)
 		return -1;
 	if (d->type == MODMENU_ACTION && !d->callback)
 		return -1;
@@ -197,7 +208,10 @@ static int addItem(int tab, const modMenuItem_t* d)
 			items[i].enabled = 1;
 			items[i].definition = *d;
 			items[i].valueLabel = 0;
-			copyText(items[i].label, label, 48);
+			items[i].buttonCount = items[i].buttonCursor = 0;
+			items[i].label[0] = 0;
+			if (*label)
+				copyText(items[i].label, label, 48);
 			items[i].definition.label = items[i].label;
 			return items[i].handle;
 		}
@@ -244,6 +258,39 @@ static int setItemValueLabel(int handle, ModMenuListLabel label)
 			items[i].valueLabel = label;
 			return 0;
 		}
+	return -1;
+}
+
+static int itemShown(const item_t* item)
+{
+	return item->handle && (item->definition.type != MODMENU_BUTTON_ROW || item->buttonCount > 0);
+}
+
+static int setItemButtons(int handle, const modMenuButton_t* buttons, int count)
+{
+	int i, j;
+	char labels[MODMENU_MAX_ROW_BUTTONS][24];
+	if (count < 0 || count > MODMENU_MAX_ROW_BUTTONS || (count && !buttons))
+		return -1;
+	for (j = 0; j < count; ++j)
+		if (!buttons[j].callback || !copyText(labels[j], buttons[j].label, sizeof(labels[j])))
+			return -1;
+	for (i = 0; i < MODMENU_MAX_ITEMS; ++i) {
+		item_t* item = &items[i];
+		if (item->handle != handle || !handle || item->definition.type != MODMENU_BUTTON_ROW)
+			continue;
+		for (j = 0; j < count; ++j) {
+			copyText(item->buttonLabels[j], labels[j], sizeof(item->buttonLabels[j]));
+			item->buttons[j] = buttons[j];
+			item->buttons[j].label = item->buttonLabels[j];
+		}
+		item->buttonCount = count;
+		if (item->buttonCursor >= count)
+			item->buttonCursor = 0;
+		if (!count && selectedItem == handle)
+			selectItem(1);
+		return 0;
+	}
 	return -1;
 }
 
@@ -309,8 +356,9 @@ static void drawFooter(void)
 	int i = tabIndex(selectedTab);
 	menuBackendText(.12f, .81f, 0x80ffffff, "\x14 \x15 TAB   \x10 SELECT   \x12 BACK");
 	if (i >= 0 && tabs[i].action) {
-		menuBackendText(.66f, .81f, 0x80ffffff, "\x13");
-		menuBackendText(.69f, .81f, 0x80ffffff, tabs[i].actionLabel);
+		float x = .88f - menuBackendWidth(tabs[i].actionLabel);
+		menuBackendText(x - .03f, .81f, 0x80ffffff, "\x13");
+		menuBackendText(x, .81f, 0x80ffffff, tabs[i].actionLabel);
 	}
 }
 
@@ -400,13 +448,46 @@ static void selectItem(int direction)
 		index = direction > 0 ? -1 : 0;
 	for (i = 0; i < MODMENU_MAX_ITEMS; ++i) {
 		index = (index + direction + MODMENU_MAX_ITEMS) % MODMENU_MAX_ITEMS;
-		if (items[index].handle && items[index].tab == selectedTab && items[index].enabled &&
+		if (itemShown(&items[index]) && items[index].tab == selectedTab && items[index].enabled &&
 		    items[index].definition.type != MODMENU_LABEL && items[index].definition.type != MODMENU_HEADER) {
 			selectedItem = items[index].handle;
 			return;
 		}
 	}
 	selectedItem = 0;
+}
+
+/* L2/R2 move five selectable rows, stopping at either end. */
+static void selectPage(int direction)
+{
+	int index = tabIndex(selectedTab), i, count = 0, current = 0, target;
+	if (index >= 0 && tabs[index].count) {
+		tab_t* tab = &tabs[index];
+		target = tab->cursor + direction * 5;
+		tab->cursor = target < 0 ? 0 : target >= tab->count ? tab->count - 1 : target;
+		return;
+	}
+	for (i = 0; i < MODMENU_MAX_ITEMS; ++i) {
+		item_t* item = &items[i];
+		if (!itemShown(item) || item->tab != selectedTab || !item->enabled ||
+		    item->definition.type == MODMENU_LABEL || item->definition.type == MODMENU_HEADER)
+			continue;
+		if (item->handle == selectedItem)
+			current = count;
+		++count;
+	}
+	target = current + direction * 5;
+	target = target < 0 ? 0 : target >= count ? count - 1 : target;
+	for (i = 0; i < MODMENU_MAX_ITEMS; ++i) {
+		item_t* item = &items[i];
+		if (!itemShown(item) || item->tab != selectedTab || !item->enabled ||
+		    item->definition.type == MODMENU_LABEL || item->definition.type == MODMENU_HEADER)
+			continue;
+		if (target-- == 0) {
+			selectedItem = item->handle;
+			return;
+		}
+	}
 }
 
 static void activate(int direction)
@@ -425,6 +506,18 @@ static void activate(int direction)
 			int value;
 			if (!items[i].enabled || !visible(items[i].tab))
 				return;
+			if (d->type == MODMENU_BUTTON_ROW) {
+				item_t* item = &items[i];
+				if (!item->buttonCount)
+					return;
+				if (direction) {
+					item->buttonCursor = (item->buttonCursor + direction + item->buttonCount) % item->buttonCount;
+				} else {
+					modMenuButton_t button = item->buttons[item->buttonCursor];
+					button.callback(button.context);
+				}
+				return;
+			}
 			callback = d->callback;
 			context = d->context;
 			if (d->type == MODMENU_TOGGLE)
@@ -448,7 +541,7 @@ static void activate(int direction)
 static void number(char* dst, int value)
 {
 	char rev[12];
-	u32 n = value < 0 ? 0 - (u32)value : (u32)value;
+	u32 n = value < 0 ? 0U - (u32)value : (u32)value;
 	int i = 0, j = 0;
 	if (value < 0)
 		dst[j++] = '-';
@@ -493,7 +586,7 @@ static void drawTabs(void)
 		float w = tabWidth(ids[k]);
 		if (x + w > .8601f)
 			break;
-		menuBackendBox(x + .003f, .225f, w - .006f, .075f, ids[k] == tabIndex(selectedTab) ? 0x80606060 : 0x80404040);
+		menuBackendBox(x + .003f, .225f, w - .006f, .075f, ids[k] == tabIndex(selectedTab) ? 0x80000040 : 0x80404040);
 		menuBackendText(x + .02f, .245f, 0x80ffffff, tabs[ids[k]].label);
 		x += w;
 		end = k + 1;
@@ -558,12 +651,11 @@ static void draw(void)
 	if (selectedTab == homeTab) {
 		const char* region = loader->region == 1   ? "Region: NTSC-U"
 		                     : loader->region == 2 ? "Region: PAL"
-		                     : loader->region == 3 ? "Region: NTSC-J"
-		                                           : "Region: NTSC-K";
+		                                           : loader->region == 3 ? "Region: NTSC-J" : "Region: NTSC-K";
 		menuBackendText(.13f, .325f, 0x80ffffff, "DL Mod Menu   v" MODMENU_VERSION_STRING);
 		menuBackendText(.13f, .39f, 0x80ffffff, "Shared controls for campaign and multiplayer.");
 		menuBackendText(.13f, .435f, 0x80ffffff, "Mods add their own tabs, settings and actions.");
-		menuBackendBox(.125f, .50f, .75f, .12f, 0x80303030);
+		menuBackendBox(.125f, .50f, .75f, .12f, 0x80000040);
 		menuBackendText(
 		    .14f, .52f, 0x80ffffff, loader->mode == DL_MODE_CAMPAIGN ? "Mode: Campaign" : "Mode: Multiplayer");
 		menuBackendText(.53f, .52f, 0x80ffffff, region);
@@ -577,8 +669,8 @@ static void draw(void)
 		tab_t* t = &tabs[index];
 		/* Odd row count keeps the highlighted entry in the exact center.
          * Wrap neighbors at both ends, as Horizon's vertical list does. */
-		menuBackendBox(.11f, .3f, .365f, .5f, 0x80303030);
-		menuBackendBox(.485f, .515f, .40f, .048f, 0x80606060);
+		menuBackendBox(.11f, .3f, .365f, .5f, 0x80000040);
+		menuBackendBox(.485f, .515f, .40f, .048f, 0x80404040);
 		for (i = -4; i <= 4; ++i) {
 			int item = (t->cursor + i + t->count * 4) % t->count;
 			const char* label = t->listLabel(t->context, item);
@@ -609,12 +701,12 @@ static void draw(void)
 		return;
 	}
 	for (i = 0; i < MODMENU_MAX_ITEMS; ++i)
-		if (items[i].handle && items[i].tab == selectedTab) {
+		if (itemShown(&items[i]) && items[i].tab == selectedTab) {
 			if (items[i].handle == selectedItem)
 				selectedRow = row;
 			++row;
 		}
-	/* Scroll only when the selection moves beyond the visible rows. */
+	/* Keep the viewport still until selection crosses either visible edge. */
 	if (index >= 0) {
 		if (selectedRow < tabs[index].firstRow)
 			tabs[index].firstRow = selectedRow;
@@ -624,7 +716,7 @@ static void draw(void)
 	}
 	row = 0;
 	for (i = 0; i < MODMENU_MAX_ITEMS; ++i)
-		if (items[i].handle && items[i].tab == selectedTab) {
+		if (itemShown(&items[i]) && items[i].tab == selectedTab) {
 			float y;
 			u32 color = items[i].enabled ? 0x80ffffff : 0x80606060;
 			if (row++ < start)
@@ -632,15 +724,49 @@ static void draw(void)
 			if (row > start + 8)
 				break;
 			y = .32f + (row - start - 1) * .058f;
-			if (items[i].handle == selectedItem) {
+			if (items[i].handle == selectedItem && items[i].definition.type != MODMENU_BUTTON_ROW) {
 				color = 0x80ffffff;
 				/* Keep standard controls inside the same .11..89 content pane
                  * used by the home tab and custom-map list. */
-				menuBackendBox(.115f, y - .008f, .77f, .052f, 0x80606060);
+				menuBackendBox(.115f, y - .008f, .77f, .052f, 0x80404040);
 			}
 			if (items[i].definition.type == MODMENU_HEADER) {
-				/* Horizon DL uses centered, full-white section labels. */
+				/* Horizon's section labels are centered and nonselectable. */
 				menuBackendText(.5f - menuBackendWidth(items[i].label) * .5f, y, 0x80ffffff, items[i].label);
+				continue;
+			}
+			if (items[i].definition.type == MODMENU_BUTTON_ROW) {
+				item_t* item = &items[i];
+				float x = .865f;
+				int centered = !item->label[0];
+				int j;
+				if (centered) {
+					float total = 0;
+					for (j = 0; j < item->buttonCount; ++j) {
+						float width = menuBackendWidth(item->buttons[j].label) + .08f;
+						total += width < .13f ? .13f : width;
+					}
+					if (item->buttonCount > 1)
+						total += .018f * (item->buttonCount - 1);
+					x = .5f + total * .5f;
+				} else {
+					menuBackendText(.15f, y, color, item->label);
+				}
+				for (j = item->buttonCount - 1; j >= 0; --j) {
+					const char* label = item->buttons[j].label;
+					float textWidth = menuBackendWidth(label);
+					float width = textWidth + (centered ? .08f : .035f);
+					int focused = item->handle == selectedItem && j == item->buttonCursor;
+					if (centered && width < .13f)
+						width = .13f;
+					x -= width;
+					if (focused)
+						menuBackendBox(x - .006f, y - .008f, width + .012f, .052f, 0x80404040);
+					menuBackendBox(x, y - .004f, width, .044f, 0x80303030);
+					menuBackendBox(x + .004f, y, width - .008f, .036f, 0x80505050);
+					menuBackendText(x + (width - textWidth) * .5f, y, color, label);
+					x -= .018f;
+				}
 				continue;
 			}
 			if (items[i].definition.type == MODMENU_ACTION) {
@@ -659,8 +785,9 @@ static void draw(void)
 				menuBackendText(.865f - menuBackendWidth(state), y, color, state);
 			}
 			if (items[i].definition.type == MODMENU_RANGE) {
-				const char* label = items[i].valueLabel ?
-				    items[i].valueLabel(items[i].definition.context, *items[i].definition.value) : 0;
+				const char* label = items[i].valueLabel
+				                        ? items[i].valueLabel(items[i].definition.context, *items[i].definition.value)
+				                        : 0;
 				if (!label) {
 					number(value, *items[i].definition.value);
 					label = value;
@@ -720,12 +847,13 @@ static void updateMenu(void)
 	}
 	level = menuBackendLevel();
 	buttons = menuBackendButtons(loader->mode);
-	if (previousMode != loader->mode || level != lastLevel) {
+	if (previousMode != loader->mode || level != lastLevel || previousContext != loader->context) {
 		closeMenu();
-		menuBackendRelease();
+		menuBackendDeactivate();
 		closingButtons = 0;
 		previousButtons = buttons;
 		previousMode = loader->mode;
+		previousContext = loader->context;
 		lastLevel = level;
 	}
 	menuBackendPause(loader->mode, openFromPause);
@@ -748,8 +876,8 @@ static void updateMenu(void)
 	pressed = buttons & ~previousButtons;
 	/* Thumbstick shortcuts belong to front-end menus, not gameplay.
      * In-game opening is exclusively through the pause-menu callback. */
-	if ((loader->mode == DL_MODE_MULTIPLAYER ? level == 39 : level < 0) && (buttons & 6) == 6 &&
-	    (previousButtons & 6) != 6) {
+	if (loader->context != DL_CONTEXT_ONLINE && (loader->mode == DL_MODE_MULTIPLAYER ? level == 39 : level < 0) &&
+	    (buttons & 6) == 6 && (previousButtons & 6) != 6) {
 		opened = !opened;
 		if (!opened)
 			closingButtons = buttons;
@@ -789,10 +917,17 @@ static void updateMenu(void)
 	}
 	if (!selectedItem && (tabIndex(selectedTab) < 0 || !tabs[tabIndex(selectedTab)].count))
 		selectItem(1);
-	if (pressed & 0x10)
-		selectItem(-1);
-	else if (pressed & 0x40)
-		selectItem(1);
+	if (pressed & 0x350) {
+		int index = tabIndex(selectedTab);
+		int previousItem = selectedItem;
+		int previousCursor = index >= 0 ? tabs[index].cursor : 0;
+		if (pressed & 0x300)
+			selectPage(pressed & 0x100 ? -1 : 1);
+		else
+			selectItem(pressed & 0x10 ? -1 : 1);
+		if (selectedItem != previousItem || (index >= 0 && tabs[index].cursor != previousCursor))
+			menuBackendNavigate();
+	}
 	if (pressed & 0x80)
 		activate(-1);
 	else if (pressed & 0x20)

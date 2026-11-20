@@ -306,3 +306,20 @@ void menuBackendDeactivate(void)
 	ready = 0;
 	openPauseMenu = 0;
 }
+
+/*
+ * NAME : menuBackendNavigate
+ * DESCRIPTION : Play Deadlocked's native multiplayer menu navigation sound.
+ * NOTES : Campaign sound addresses require separate regional verification.
+ * ARGS :
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+void menuBackendNavigate(void)
+{
+	u32 address;
+	if (!ready || currentMode != DL_MODE_MULTIPLAYER || DL_MODULE_REGION != 1)
+		return;
+	address = multiplayerGameCode() ? 0x58f918 : 0x66d468;
+	((void (*)(int, int, void*))address)(0x10, 0, 0);
+}

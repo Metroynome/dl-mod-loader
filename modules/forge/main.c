@@ -286,8 +286,11 @@ static void updateMenu(int ready, int canRefresh)
 	static const modMenuItem_t airwalk = {"Free Cam Airwalk", MODMENU_TOGGLE, &forgeFreecam.airwalk, 0, 1, 1, 0, 0};
 	static const modMenuItem_t lockPosition = {"Free Cam Lock Position", MODMENU_TOGGLE, &forgeFreecam.lockPosition, 0, 1, 1, 0, 0};
 	static const modMenuItem_t lockAnimation = {"Free Cam Lock Animation", MODMENU_TOGGLE, &forgeFreecam.lockAnimation, 0, 1, 1, 0, 0};
-	static const modMenuItem_t save = {"Save Settings", MODMENU_ACTION, 0, 0, 0, 0, configAction, (void*)1};
-	static const modMenuItem_t load = {"Load Settings", MODMENU_ACTION, 0, 0, 0, 0, configAction, 0};
+	static const modMenuItem_t config = {"", MODMENU_BUTTON_ROW, 0, 0, 0, 0, 0, 0};
+	static const modMenuButton_t configButtons[] = {
+		{"Load Settings", configAction, 0},
+		{"Save Settings", configAction, (void*)1}
+	};
 	if (!menu)
 		menu = modmenuFind(loader);
 	if (!menu)
@@ -313,8 +316,7 @@ static void updateMenu(int ready, int canRefresh)
 		menu->addItem(tab, &airwalk);
 		menu->addItem(tab, &lockPosition);
 		menu->addItem(tab, &lockAnimation);
-		menu->addItem(tab, &save);
-		menu->addItem(tab, &load);
+		menu->setItemButtons(menu->addItem(tab, &config), configButtons, 2);
 		lastReady = lastRefresh = -1;
 	}
 	menu->setItemEnabled(modeItem, loader->mode == DL_MODE_MULTIPLAYER);

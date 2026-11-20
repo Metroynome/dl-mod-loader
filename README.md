@@ -144,3 +144,29 @@ Run `make release` to build the NTSC-U, PAL, NTSC-J and combined ZIPs;
 `make check-release` validates their contents and checksums. The GitHub release
 workflow runs the same steps. NTSC-K builds are available from source, but no
 CRC-verified Korean package is included. See [release instructions](release/README.md).
+
+## Module requirements and menu rows
+
+A module can declare either or both requirements in its `Makefile.defs`:
+
+```make
+REQUIRES = modmenu extra-ram
+```
+
+Only declare features the module needs to run. Missing requirements keep the
+module inactive. A BIOS-style popup lists only the missing items; press X on
+Okay to continue without the module. Each module's warning appears once per
+boot. `extra-ram` requires the loader's usable expanded-RAM pool, including its
+BIOS compatibility check. Existing modules do not acquire new requirements.
+Requirement flags need this updated loader; rebuild modules after API changes.
+
+Mod Menu supports Up/Down navigation, L2/R2 to jump five rows, and Left/Right
+within button rows. Load Settings and Save Settings share a centered, padded
+row, with Load first. Multiplayer navigation uses the native menu sound.
+Campaign sound addresses remain unverified.
+
+Use `MODMENU_BUTTON_ROW` with `setItemButtons(item, buttons, count)` for up to
+four independently selectable actions. Each `modMenuButton_t` contains a label,
+callback and context. Labels and definitions are copied. An empty item label
+centers the row; zero buttons hides it. The appended API function is at EE
+offset `0x58`; the API size is `0x5c`. Existing API fields keep their offsets.

@@ -9,6 +9,7 @@
 #include "exception.h"
 #include "platform.h"
 #include "strings.h"
+#include "requirements.h"
 
 #ifndef MODULE_START
 #define MODULE_START (((u32)_loader_end + 63) & ~(u32)63)
@@ -43,8 +44,10 @@ typedef struct loadedModule {
 	/* 0x18 */ u32 contexts;
 	/* 0x1c */ u32 policy;
 	/* 0x20 */ u32 active;
-	/* 0x24 */ ModuleLifecycle activate;
-	/* 0x28 */ ModuleLifecycle deactivate;
+	/* 0x24 */ u32 requirements;
+	/* 0x28 */ u32 missing;
+	/* 0x2c */ ModuleLifecycle activate;
+	/* 0x30 */ ModuleLifecycle deactivate;
 } loadedModule_t;
 
 typedef struct moduleService {
@@ -64,12 +67,12 @@ typedef struct loaderState {
 	/* 0x18 */ u32 exceptionAttempted;
 	/* 0x1c */ u32 exceptionReserved;
 	/* 0x20 */ loadedModule_t modules[MODULE_LIMIT];
-	/* 0x180 */ moduleApi_t api;
-	/* 0x1c4 */ int configBusy;
-	/* 0x1c8 */ u32 currentModule; /* index + 1; zero outside callbacks */
-	/* 0x1cc */ moduleService_t services[8];
-	/* 0x24c */ u32 poolStart;
-	/* 0x250 */ u32 poolEnd;
+	/* 0x1c0 */ moduleApi_t api;
+	/* 0x204 */ int configBusy;
+	/* 0x208 */ u32 currentModule; /* index + 1; zero outside callbacks */
+	/* 0x20c */ moduleService_t services[8];
+	/* 0x28c */ u32 poolStart;
+	/* 0x290 */ u32 poolEnd;
 } loaderState_t;
 
 extern u8 _loader_end[];
@@ -116,7 +119,7 @@ static u32 modeContexts(u32 mode)
 
 static int moduleAllowed(const loadedModule_t* m)
 {
-	return (m->modes & STATE->mode) && (m->contexts & m->policy & loaderApi.context);
+	return !m->missing && (m->modes & STATE->mode) && (m->contexts & m->policy & loaderApi.context);
 }
 
 static int setLifecycle(ModuleLifecycle activate, ModuleLifecycle deactivate)
@@ -287,11 +290,10 @@ static u32 nextModuleAddress(u32 size)
 
 static int validHeader(const moduleHeader_t* h)
 {
-	u32 address = nextModuleAddress(h->memorySize);
 	return h->magic == DL_MODULE_MAGIC && h->version == DL_MODULE_VERSION &&
-	       (!h->region || h->region == DL_MODULE_REGION) && h->address == 0x000f0000 && h->modes &&
-	       !(h->modes & ~(u32)3) && h->imageSize >= sizeof(moduleDiscovery_t) && !(h->imageSize & 3) &&
-	       h->imageSize <= h->memorySize && address < STATE->poolEnd && h->memorySize <= STATE->poolEnd - address &&
+	       (!h->region || h->region == DL_MODULE_REGION) && h->address == 0x000f0000 && (h->modes & DL_MODE_BOTH) &&
+	       !(h->modes & ~(DL_MODE_BOTH | DL_REQUIRE_ALL)) && h->imageSize >= sizeof(moduleDiscovery_t) && !(h->imageSize & 3) &&
+	       h->imageSize <= h->memorySize &&
 	       h->relocationCount <= (h->imageSize - sizeof(moduleDiscovery_t)) / 4 &&
 	       validEntry(h->initOffset, h->imageSize) && validEntry(h->updateOffset, h->imageSize);
 }
@@ -452,7 +454,18 @@ static void loadModule(const char* name, u32 modes, char names[MODULE_LIMIT][112
 		fileClose(fd);
 		return;
 	}
+	/* Reject RAM requirements before reserving or writing a large image. */
+	if ((header.modes & DL_REQUIRE_EXTRA_RAM) && STATE->poolStart != EXTRA_RAM_START) {
+		moduleRequirementsNotice(filename, header.modes & DL_REQUIRE_ALL);
+		fileClose(fd);
+		return;
+	}
 	address = nextModuleAddress(header.memorySize);
+	if (address >= STATE->poolEnd || header.memorySize > STATE->poolEnd - address) {
+		printf("loader: no free space: %s\n", name);
+		fileClose(fd);
+		return;
+	}
 	memset((void*)address, 0, header.memorySize);
 	valid = readExact(fd, (void*)address, header.imageSize) && relocateModule(fd, &header, address);
 	if (fileClose(fd) < 0)
@@ -468,6 +481,8 @@ static void loadModule(const char* name, u32 modes, char names[MODULE_LIMIT][112
 	module->size = header.memorySize;
 	module->update = 0;
 	module->modes = modes;
+	module->requirements = header.modes & DL_REQUIRE_ALL;
+	module->missing = 0;
 	module->contexts = contexts;
 	module->policy = DL_CONTEXT_ALL;
 	module->initialized = 0;
@@ -626,6 +641,7 @@ void loaderTick(u32 layout)
 		MODULE_TABLE->entrySize = sizeof(moduleInfo_t);
 		MODULE_TABLE->magic = DL_MODULE_TABLE_MAGIC;
 		selectModulePool(platformMemorySize());
+		moduleRequirementsReset(STATE->poolStart == EXTRA_RAM_START);
 		STATE->magic = LOADER_MAGIC;
 	}
 	if (!platformReady(layout))
@@ -675,6 +691,18 @@ void loaderTick(u32 layout)
 	}
 	for (i = 0; i < STATE->count; ++i) {
 		loadedModule_t* module = &STATE->modules[i];
+		if (!(module->modes & STATE->mode) || !(module->contexts & module->policy & loaderApi.context))
+			continue;
+		module->missing = moduleRequirementsMissing(module->requirements);
+		if (module->missing) {
+			moduleRequirementsNotice(MODULE_TABLE->entries[i].name, module->requirements);
+			if (module->active) {
+				STATE->currentModule = i + 1;
+				if (module->deactivate)
+					module->deactivate();
+				module->active = 0;
+			}
+		}
 		if (!moduleAllowed(module))
 			continue;
 		STATE->currentModule = i + 1;
@@ -712,5 +740,6 @@ void loaderTick(u32 layout)
 		}
 	}
 	STATE->currentModule = 0;
+	moduleRequirementsTick();
 	STATE->busy = 0;
 }

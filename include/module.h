@@ -22,6 +22,10 @@
 #define DL_MODULE_EXPORTS           __attribute__((section(".module.exports")))
 #define DL_MODULE_TABLE_MAGIC       (0x444d5442)
 #define DL_MODULE_LIMIT             (8)
+/* Requirement flags share the modes word; low bits remain execution modes. */
+#define DL_REQUIRE_MODMENU          (0x100)
+#define DL_REQUIRE_EXTRA_RAM        (0x200)
+#define DL_REQUIRE_ALL              (DL_REQUIRE_MODMENU | DL_REQUIRE_EXTRA_RAM)
 
 /* Read only. Loaded does not imply active in the current execution context.
  * Entries remain valid until restart; do not call unknown code via address. */

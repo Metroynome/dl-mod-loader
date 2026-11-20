@@ -10,6 +10,8 @@
 #define MODMENU_RANGE             (3)
 #define MODMENU_LABEL             (4)
 #define MODMENU_HEADER            (5)
+#define MODMENU_BUTTON_ROW        (6)
+#define MODMENU_MAX_ROW_BUTTONS   (4)
 #define MODMENU_SHOW_MAIN_MENU    (1)
 #define MODMENU_SHOW_CAMPAIGN     (2)
 #define MODMENU_SHOW_MULTIPLAYER  (4)
@@ -26,6 +28,12 @@
  * Labels are copied. Value/context pointers must remain valid until removeTab.
  * Callbacks run synchronously on the game thread. Never block inside one. */
 typedef void (*ModMenuCallback)(void* context);
+
+typedef struct modMenuButton {
+	/* 0x00 */ const char* label;
+	/* 0x04 */ ModMenuCallback callback;
+	/* 0x08 */ void* context;
+} modMenuButton_t;
 
 /* Pointer-bearing offsets describe the EE's 32-bit ABI. */
 typedef struct modMenuItem {
@@ -86,6 +94,8 @@ typedef struct modMenuApi {
 	/* EE offset 0x54: named choices for a range, wrapping at either end.
 	 * Uses the item's context and current value; NULL restores a numeric range. */
 	/* 0x54 */ int (*setItemValueLabel)(int item, ModMenuListLabel label);
+	/* Button rows copy labels/callbacks; an empty label centers the buttons. */
+	/* 0x58 */ int (*setItemButtons)(int item, const modMenuButton_t* buttons, int count);
 } modMenuApi_t;
 
 /* Look this up again after mode changes; absence is normal, not fatal.
