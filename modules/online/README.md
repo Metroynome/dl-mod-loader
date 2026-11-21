@@ -17,14 +17,15 @@ Copy `hostfs/dl/mods/online.ntscu.bin` and the entire generated
 `online campaign` to `dl/config/modules.txt` and restart. The normal development
 list leaves it disabled. Mod Menu and expanded RAM are not required.
 
-Load a campaign/Cooperative save first. In MOD MENU → Online:
+Load a campaign/Cooperative save first. With Co-op enabled, use MOD MENU -> Online:
 
 - On the host, select Host. It listens on Host Port (default `25565`).
-- On the guest, enter the host's four IPv4 bytes and Host Port, then select Join.
+- On the guest, press X on IP Address to enter the host's IPv4 address, set
+  Host Port, then select Join. Ports support Left/Right or X for numeric entry.
 - Host returns to gameplay once listening; Join returns once connected. Failed
   requests leave the menu open for correction or retry.
-- Defaults are host IP `192.168.1.190`, Host Port `25565`, and guest Local Port
-  `25566`. These let the two test emulators connect on the same PC unchanged.
+- Fresh defaults are no host IP, Host Port `25565`, and guest Local Port
+  `25566`. Co-op's Load/Save Settings buttons persist these connection defaults.
 - Hold Left/Right on numeric fields to repeat. D-pad pressure increases the
   repeat speed, and long holds accelerate large numbers such as ports.
 - Connected means the handshake and peer heartbeats work. Disconnect closes the
@@ -46,7 +47,11 @@ Follow the loader discovery pointer at `0x000a0000` to its module table, find
 `online.ntscu.bin`, then read the exports pointer at that module's load address.
 It points to `onlineControl_t` in [include/online.h](include/online.h).
 Service `ONLINE_SERVICE_ID`, version `2`, publishes `onlineApi_t` instead. Its
-`control` pointer references that mailbox. This interface is experimental.
+`control` pointer references that mailbox. The appended `request(command,
+address, hostPort, localPort)` function queues the same mailbox commands without
+depending on a UI. The EE API size is now `0x1c`; the mailbox is unchanged.
+This interface is experimental. Online alone has no menu dependency: Co-op owns
+the optional connection panel, and other adapters can use the API or mailbox.
 
 Require magic `0x314e4c44`, size `0x34`, and an advancing heartbeat. Write the
 command at `+0x24`, local port at `+0x28`, host port at `+0x2a`, and the four host

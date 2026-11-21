@@ -185,6 +185,26 @@ int menuBackendPressure(u32 button)
 	return sample[1] == 0x79 && sample[index] ? sample[index] : 128;
 }
 
+/*
+ * NAME : menuBackendRightStick
+ * DESCRIPTION : Read the right stick before menu input blocking.
+ * NOTES : Digital controllers return a centered stick.
+ * ARGS :
+ * RETURN : Horizontal byte followed by vertical byte.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+u32 menuBackendRightStick(void)
+{
+	struct PAD* pad = currentPad(0);
+	const u8* sample;
+	if (!ready || !pad)
+		return 0x7f7f;
+	sample = captured[0].pad == pad ? captured[0].sample : pad->rdata;
+	if ((sample[1] & 0xf0) != 0x70)
+		return 0x7f7f;
+	return sample[4] | (sample[5] << 8);
+}
+
 void menuBackendCapture(u32 mode)
 {
 	int i, j;

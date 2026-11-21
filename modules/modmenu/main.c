@@ -3,6 +3,7 @@
 #include "modules/modmenu/include/modmenu.h"
 #include "backend.h"
 #include "version.h"
+#include "boot.h"
 
 typedef struct tab {
 	/* 0x00 */ int handle;
@@ -47,6 +48,7 @@ static int setItemButtons(int handle, const modMenuButton_t* buttons, int count)
 static int itemShown(const item_t* item);
 static void selectItem(int direction);
 static int isOpen(void);
+static u32 getButtons(void);
 static void closeMenu(void);
 static void returnToGame(void);
 static int getActiveTab(void);
@@ -94,7 +96,9 @@ static const modMenuApi_t menuApi = {
 	setTabAction,
 	setItemValueLabel,
 	setItemButtons,
-	returnToGame
+	returnToGame,
+	getButtons,
+	menuBackendRightStick
 };
 /* A window of whole tabs: measured text plus Horizon-style padding. Scroll
  * the first visible tab only when the focused tab would fall outside it. */
@@ -196,13 +200,14 @@ static int addItem(int tab, const modMenuItem_t* d)
 		label[0] = 0;
 	else if (!copyText(label, d->label, sizeof(label)))
 		return -1;
-	if (d->type < MODMENU_ACTION || d->type > MODMENU_BUTTON_ROW)
+	if (d->type < MODMENU_ACTION || d->type > MODMENU_FIELD)
 		return -1;
-	if (d->type == MODMENU_ACTION && !d->callback)
+	if ((d->type == MODMENU_ACTION || d->type == MODMENU_FIELD) && !d->callback)
 		return -1;
 	if ((d->type == MODMENU_TOGGLE || d->type == MODMENU_RANGE) && !d->value)
 		return -1;
-	if (d->type == MODMENU_RANGE && (d->minimum > d->maximum || d->step <= 0))
+	if ((d->type == MODMENU_RANGE || (d->type == MODMENU_FIELD && d->value)) &&
+	    (d->minimum > d->maximum || d->step <= 0))
 		return -1;
 	for (i = 0; i < MODMENU_MAX_ITEMS; ++i)
 		if (!items[i].handle) {
@@ -259,7 +264,8 @@ static int setItemValueLabel(int handle, ModMenuListLabel label)
 {
 	int i;
 	for (i = 0; i < MODMENU_MAX_ITEMS; ++i)
-		if (items[i].handle == handle && handle && items[i].definition.type == MODMENU_RANGE) {
+		if (items[i].handle == handle && handle &&
+		    (items[i].definition.type == MODMENU_RANGE || items[i].definition.type == MODMENU_FIELD)) {
 			items[i].valueLabel = label;
 			return 0;
 		}
@@ -302,6 +308,19 @@ static int setItemButtons(int handle, const modMenuButton_t* buttons, int count)
 static int isOpen(void)
 {
 	return opened;
+}
+
+/*
+ * NAME : getButtons
+ * DESCRIPTION : Expose held buttons without bypassing menu input capture.
+ * NOTES : Uses the same original pad sample as the modal's new presses.
+ * ARGS :
+ * RETURN : Held PAD bits.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+static u32 getButtons(void)
+{
+	return menuBackendButtons(loader->mode);
 }
 
 static void closeMenu(void)
@@ -556,6 +575,17 @@ static void activate(int direction, int multiplier)
 				*d->value = value;
 				if (direction && value != previous)
 					menuBackendAdjust();
+			} else if (d->type == MODMENU_FIELD) {
+				if (direction) {
+					if (d->value) {
+						long long next = (long long)*d->value + (long long)direction * d->step * multiplier;
+						int previous = *d->value;
+						*d->value = next < d->minimum ? d->minimum : next > d->maximum ? d->maximum : (int)next;
+						if (*d->value != previous)
+							menuBackendAdjust();
+					}
+					return;
+				}
 			} else if (d->type != MODMENU_ACTION || direction < 0)
 				return;
 			/* Copy callback/context first: callbacks may unregister their own tab. */
@@ -584,7 +614,8 @@ static void repeatRange(u32 buttons, u32 pressed)
 	for (i = 0; i < MODMENU_MAX_ITEMS; ++i)
 		if (items[i].handle == selectedItem && selectedItem)
 			break;
-	if (i == MODMENU_MAX_ITEMS || !items[i].enabled || items[i].definition.type != MODMENU_RANGE || items[i].valueLabel) {
+	if (i == MODMENU_MAX_ITEMS || !items[i].enabled || !items[i].definition.value ||
+	    (items[i].definition.type != MODMENU_RANGE && items[i].definition.type != MODMENU_FIELD) || items[i].valueLabel) {
 		repeatButton = 0;
 		return;
 	}
@@ -853,10 +884,13 @@ static void draw(void)
 				const char* state = *items[i].definition.value ? "ON" : "OFF";
 				menuBackendText(.865f - menuBackendWidth(state), y, color, state);
 			}
-			if (items[i].definition.type == MODMENU_RANGE) {
+			if (items[i].definition.type == MODMENU_RANGE || items[i].definition.type == MODMENU_FIELD) {
 				const char* label = items[i].valueLabel
-				                        ? items[i].valueLabel(items[i].definition.context, *items[i].definition.value)
+				                        ? items[i].valueLabel(items[i].definition.context,
+				                              items[i].definition.value ? *items[i].definition.value : 0)
 				                        : 0;
+				if (!label && !items[i].definition.value)
+					continue;
 				if (!label) {
 					number(value, *items[i].definition.value);
 					label = value;
@@ -1014,6 +1048,8 @@ static void updateMenu(void)
 
 void moduleUpdate(void)
 {
+	if (loader->mode == DL_MODE_CAMPAIGN)
+		dlResetBootIdle();
 	menuBackendUpdate(loader->mode, updateMenu);
 	if (resumeRequested && !opened && !closingButtons) {
 		resumeRequested = 0;

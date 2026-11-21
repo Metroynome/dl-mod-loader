@@ -11,6 +11,7 @@
 #define MODMENU_LABEL             (4)
 #define MODMENU_HEADER            (5)
 #define MODMENU_BUTTON_ROW        (6)
+#define MODMENU_FIELD             (7)
 #define MODMENU_MAX_ROW_BUTTONS   (4)
 #define MODMENU_SHOW_MAIN_MENU    (1)
 #define MODMENU_SHOW_CAMPAIGN     (2)
@@ -35,7 +36,10 @@ typedef struct modMenuButton {
 	/* 0x08 */ void* context;
 } modMenuButton_t;
 
-/* Pointer-bearing offsets describe the EE's 32-bit ABI. */
+/* Pointer-bearing offsets describe the EE's 32-bit ABI.
+ * FIELD is a normal highlighted label/value row: X opens its callback.
+ * With a value pointer, Left/Right adjust its numeric range without calling
+ * the callback. With NULL, it is an X-only field (such as an IP address). */
 typedef struct modMenuItem {
 	/* 0x00 */ const char* label;
 	/* 0x04 */ u32 type;
@@ -92,12 +96,16 @@ typedef struct modMenuApi {
 	 * Appended API-1 extension; EE function-pointer offset is 0x50. */
 	/* 0x50 */ int (*setTabAction)(int tab, const char* label, ModMenuCallback callback, void* context);
 	/* EE offset 0x54: named choices for a range, wrapping at either end.
+	 * Also supplies the display text of a FIELD (value is zero when NULL).
 	 * Uses the item's context and current value; NULL restores a numeric range. */
 	/* 0x54 */ int (*setItemValueLabel)(int item, ModMenuListLabel label);
 	/* Button rows copy labels/callbacks; an empty label centers the buttons. */
 	/* 0x58 */ int (*setItemButtons)(int item, const modMenuButton_t* buttons, int count);
 	/* Close the overlay and resume native gameplay after its buttons release. */
 	/* 0x5c */ void (*returnToGame)(void);
+	/* Current held buttons from the same captured pad sample as modal presses. */
+	/* 0x60 */ u32 (*getButtons)(void);
+	/* 0x64 */ u32 (*getRightStick)(void); /* Raw X/Y bytes, centered at 127. */
 } modMenuApi_t;
 
 /* Look this up again after mode changes; absence is normal, not fatal.

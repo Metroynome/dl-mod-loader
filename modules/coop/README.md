@@ -6,6 +6,57 @@ optional. Build with `make NAME=coop REGION=ntscu` and follow
 [Online's setup](../online/README.md). Enable `coop campaign` in modules.txt.
 Both systems must use matching Co-op and Online builds.
 
+## Connection UI
+
+Co-op owns the optional MOD MENU -> Online tab; Online remains the transport.
+Enable both modules to use the connection panel.
+Update Co-op, Online and Mod Menu together for the new field-row support.
+Mod Menu and Co-op each suppress the boot-menu preview-trailer countdown while
+active, so the movie cannot interrupt a menu that owns controller input.
+
+- IP Address is a normal highlighted row. Press X to open its numeric popup;
+  Left/Right do not change the address. An unset address displays `[none]` and
+  opens as `0.0.0.0`.
+- Host Port and Local Port support Left/Right adjustment, including held-button
+  repeat. X opens the same popup in Port mode, limited to 1 through 65535.
+- D-pad selects a key; holding a direction repeats after a short delay. X inserts
+  the selected key once per press. L1/R1 moves the text cursor;
+  Square or the wide Delete key removes the character before it. Done, Start or
+  R2 validates/applies; Triangle cancels without changing the old value. The
+  cursor starts at the end of the existing value; editing never clears it automatically.
+  The cursor blinks while idle and becomes visible immediately after editing.
+- Number/punctuation keys are square in render pixels. The panel, input field
+  and paired Delete/Done row follow the same keypad width.
+- Right stick moves the whole popup, stopping its outer frame at the screen
+  edges. Small stick drift is ignored; reopening centers the popup.
+- The PS5-style keypad keeps both `.` and `-` visible. IP enables only `.`,
+  Port disables both, and Number enables both for values such as `-1.06`.
+  IP input requires four numbers from 0 through 255.
+- Load Settings and Save Settings are side by side. Saved defaults load on
+  startup from `host0:dl/config/coop-online.ntscu.ini`. A fresh configuration has
+  no IP address, Host Port 25565 and Local Port 25566. Edits affect the next
+  Host/Join request, not the current connection.
+
+The implementation is under `ui/`. `numpad.h` exposes IP Address, Port and Number
+input types. Open takes initial text and numeric minimum/maximum limits. Number
+accepts signed decimal values; `coopNumpadNumber()` returns the accepted value,
+while `coopNumpadText()` preserves its spelling. `coopNumpadValue()` returns IP
+bytes or an integer port. Input holds up to 31 characters (15 for IP, 5 for Port).
+The numpad has no Mod Menu dependency.
+Standalone callers can feed raw right-stick X/Y bytes (centered at 127) to
+`coopNumpadMove` each frame. Mod Menu supplies these through `getRightStick`,
+using the original captured input before gameplay controls are blocked.
+
+The upcoming standalone UI can call `coopConnectionOpen`,
+`coopConnectionInput` and `coopConnectionDraw`, or use the numpad directly.
+Its caller must capture game input, supply both new presses and held buttons, draw once per
+frame before native graphics-chain submission, and keep closing buttons blocked
+until released. There is no standalone opening shortcut. Load/Save/Request are
+also callable without Mod Menu; initialize through `coopConnectionInit` first.
+The current Mod Menu bridge supplies capture, safe drawing and release handling.
+
+## Player and world state
+
 The adapter starts ON. Host controller 1 owns player 1; guest controller 1 owns
 player 2. Each gets a full-screen camera/HUD. Start, Select, L3/R3 and menu input
 stay local. Stale remote input becomes neutral. Disconnecting hides the peer

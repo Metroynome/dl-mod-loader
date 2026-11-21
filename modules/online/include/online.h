@@ -54,6 +54,9 @@ typedef struct onlineApi {
 	/* 0x0c */ int (*role)(void);
 	/* 0x10 */ int (*send)(u32 channel, const void* data, int size);
 	/* 0x14 */ int (*receive)(u32 channel, void* data, int capacity);
+	/* Queue a transport command; acknowledgements/status remain in control.
+	 * Host binds hostPort; Join binds localPort. No UI or settings dependency. */
+	/* 0x18 */ int (*request)(u32 command, u32 address, u16 hostPort, u16 localPort);
 } onlineApi_t;
 
 static inline const onlineApi_t* onlineFind(const moduleApi_t* loader)

@@ -1,6 +1,5 @@
 #include "include/online.h"
 #include "transport.h"
-#include "modules/modmenu/include/modmenu.h"
 #include <string.h>
 
 #define HELLO (1)
@@ -33,22 +32,20 @@ typedef struct onlineMessage {
 static int sessionRole(void);
 static int sendMessage(u32 channel, const void* data, int size);
 static int receiveMessage(u32 channel, void* data, int capacity);
+static int request(u32 command, u32 address, u16 hostPort, u16 localPort);
 
 volatile onlineControl_t moduleExports DL_MODULE_EXPORTS;
 static const onlineApi_t onlineApi = {
-	ONLINE_API_VERSION, sizeof(onlineApi_t), &moduleExports, sessionRole, sendMessage, receiveMessage
+	ONLINE_API_VERSION, sizeof(onlineApi_t), &moduleExports, sessionRole, sendMessage, receiveMessage, request
 };
 static const moduleApi_t* loader;
-static const modMenuApi_t* menu;
 static onlineRpc_t operation;
 static u32 pollTime, sendTime, receivedTime, startTime, clientToken, hostToken, peerAddress;
 static u16 peerPort;
-static int role, phase, waiting, active, stopping, tab;
-static int hostPort = 25565, localPort = 25566, ip[4] = {192, 168, 1, 190};
+static int role, phase, waiting, active, stopping;
 static onlineMessage_t outgoing, incoming;
 static u32 sendSequence, receiveSequence;
 static int outgoingReady, incomingReady, peerConfirmed;
-static int returnAfterStart;
 
 /*
  * NAME : resetMessages
@@ -135,22 +132,6 @@ static u32 ticks(void)
 }
 
 /*
- * NAME : stateLabel
- * DESCRIPTION : Label the read-only connection status row.
- * NOTES :
- * ARGS : Unused menu arguments.
- * RETURN : Connection status.
- * AUTHOR : Troy "Metroynome" Pruitt
- */
-static const char* stateLabel(void* unused, int value)
-{
-	static const char* names[] = {"Idle", "Loading drivers", "Obtaining IP", "Hosting", "Connecting", "Connected", "Failed"};
-	(void)unused;
-	(void)value;
-	return moduleExports.status <= ONLINE_FAILED ? names[moduleExports.status] : "Unavailable";
-}
-
-/*
  * NAME : begin
  * DESCRIPTION : Begin an asynchronous host or join request.
  * NOTES : Failed sessions may retry; opening the new socket closes the old one.
@@ -181,67 +162,27 @@ static int begin(int nextRole, u32 address, u16 port, u16 bindPort)
 }
 
 /*
- * NAME : command
- * DESCRIPTION : Submit menu actions through the public test mailbox.
- * NOTES : Payload is written before the request ID.
- * ARGS : Host, join or stop command.
- * RETURN :
+ * NAME : request
+ * DESCRIPTION : Queue a transport command independently of any UI.
+ * NOTES : Acknowledgement means processed, not connection success.
+ * ARGS : Command, IPv4 bytes and host/local UDP ports.
+ * RETURN : Zero queued, negative invalid or an outstanding request.
  * AUTHOR : Troy "Metroynome" Pruitt
  */
-static void command(void* context)
+static int request(u32 command, u32 address, u16 hostPort, u16 localPort)
 {
-	moduleExports.command = (u32)context;
-	returnAfterStart = moduleExports.command == ONLINE_HOST || moduleExports.command == ONLINE_JOIN;
-	moduleExports.localPort = moduleExports.command == ONLINE_HOST ? hostPort : localPort;
+	if (command < ONLINE_HOST || command > ONLINE_STOP ||
+	    (command != ONLINE_STOP && (!hostPort || !localPort)) ||
+	    (command == ONLINE_JOIN && !address))
+		return -1;
+	if (moduleExports.requestId != moduleExports.acceptedId)
+		return -2;
+	moduleExports.command = command;
+	moduleExports.hostAddress = address;
 	moduleExports.hostPort = hostPort;
-	moduleExports.hostAddress = ip[0] | (ip[1] << 8) | (ip[2] << 16) | ((u32)ip[3] << 24);
+	moduleExports.localPort = command == ONLINE_HOST ? hostPort : localPort;
 	moduleExports.requestId = moduleExports.acceptedId + 1;
-}
-
-/*
- * NAME : registerMenu
- * DESCRIPTION : Register optional direct-IP controls using the shared menu.
- * NOTES : External callers can use the mailbox without Mod Menu.
- * ARGS :
- * RETURN :
- * AUTHOR : Troy "Metroynome" Pruitt
- */
-static void registerMenu(void)
-{
-	static const modMenuButton_t buttons[] = {
-		{"Host", command, (void*)ONLINE_HOST},
-		{"Join", command, (void*)ONLINE_JOIN},
-		{"Disconnect", command, (void*)ONLINE_STOP}
-	};
-	static const char* labels[] = {"Host IP: first byte", "Host IP: second byte", "Host IP: third byte", "Host IP: fourth byte"};
-	modMenuItem_t row = {"", MODMENU_BUTTON_ROW, 0, 0, 0, 0, 0, 0};
-	modMenuItem_t status = {"Connection", MODMENU_RANGE, (int*)&moduleExports.status, ONLINE_IDLE, ONLINE_FAILED, 1, 0, 0};
-	modMenuItem_t port = {"Host Port", MODMENU_RANGE, &hostPort, 1024, 65535, 1, 0, 0};
-	modMenuItem_t bind = {"Local Port", MODMENU_RANGE, &localPort, 1024, 65535, 1, 0, 0};
-	modMenuItem_t info = {"Host uses Host Port; Join uses Local Port", MODMENU_LABEL, 0, 0, 0, 0, 0, 0};
-	int i, item;
-	if (tab)
-		return;
-	menu = modmenuFind(loader);
-	if (!menu)
-		return;
-	tab = menu->addTab("online", "Online", DL_MODE_CAMPAIGN);
-	if (tab <= 0) {
-		tab = 0;
-		return;
-	}
-	menu->setTabContexts(tab, DL_CONTEXT_CAMPAIGN);
-	menu->setItemButtons(menu->addItem(tab, &row), buttons, 3);
-	item = menu->addItem(tab, &status);
-	menu->setItemValueLabel(item, stateLabel);
-	menu->setItemEnabled(item, 0);
-	for (i = 0; i < 4; ++i) {
-		modMenuItem_t byte = {labels[i], MODMENU_RANGE, &ip[i], 0, 255, 1, 0, 0};
-		menu->addItem(tab, &byte);
-	}
-	menu->addItem(tab, &port);
-	menu->addItem(tab, &bind);
-	menu->addItem(tab, &info);
+	return 0;
 }
 
 /*
@@ -311,7 +252,7 @@ static void receivePacket(const onlineRpc_t* reply, u32 now)
 
 /*
  * NAME : deactivate
- * DESCRIPTION : Stop connection activity and remove the optional tab.
+ * DESCRIPTION : Stop connection activity and close the transport socket.
  * NOTES : Never unload drivers/reset IOP during campaign. Close finishes on re-entry if RPC is busy.
  * ARGS :
  * RETURN :
@@ -328,17 +269,13 @@ static void deactivate(void)
 			waiting = 1;
 		}
 	}
-	if (menu && tab)
-		menu->removeTab(tab);
-	menu = 0;
-	tab = 0;
 	moduleExports.status = ONLINE_IDLE;
 	outgoingReady = incomingReady = 0;
 }
 
 /*
  * NAME : activate
- * DESCRIPTION : Enable campaign connection controls.
+ * DESCRIPTION : Enable campaign transport requests.
  * NOTES :
  * ARGS :
  * RETURN :
@@ -363,9 +300,9 @@ int moduleInit(const moduleApi_t* api)
 	onlineTransportInit(api);
 	moduleExports.magic = ONLINE_MAGIC;
 	moduleExports.size = sizeof(moduleExports);
-	moduleExports.localPort = localPort;
-	moduleExports.hostPort = hostPort;
-	moduleExports.hostAddress = ip[0] | (ip[1] << 8) | (ip[2] << 16) | ((u32)ip[3] << 24);
+	moduleExports.localPort = 25566;
+	moduleExports.hostPort = 25565;
+	moduleExports.hostAddress = 0;
 	api->setLifecycle(activate, deactivate);
 	return api->publishService(ONLINE_SERVICE_ID, ONLINE_API_VERSION, &onlineApi);
 }
@@ -385,7 +322,6 @@ void moduleUpdate(void)
 	u32 now = ticks();
 	int result;
 	++moduleExports.heartbeat;
-	registerMenu();
 	if (moduleExports.requestId != moduleExports.acceptedId) {
 		moduleExports.acceptedId = moduleExports.requestId;
 		if (moduleExports.command == ONLINE_STOP)
@@ -421,12 +357,6 @@ void moduleUpdate(void)
 			stopping = 0;
 			moduleExports.status = ONLINE_IDLE;
 		}
-	}
-	if (returnAfterStart && ((role == ONLINE_HOST && moduleExports.status == ONLINE_HOSTING) ||
-	                        moduleExports.status == ONLINE_CONNECTED)) {
-		returnAfterStart = 0;
-		if (menu)
-			menu->returnToGame();
 	}
 	if (moduleExports.status == ONLINE_STARTING) {
 		result = onlineTransportReady();

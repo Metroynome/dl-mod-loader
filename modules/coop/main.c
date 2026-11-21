@@ -3,6 +3,8 @@
 #include "world.h"
 #include "objects.h"
 #include "encounters.h"
+#include "ui/connection.h"
+#include "boot.h"
 #include "modules/online/include/online.h"
 #include "modules/modmenu/include/modmenu.h"
 #include <librac4/map.h>
@@ -876,6 +878,7 @@ static void registerMenu(void)
 static void deactivate(void)
 {
 	active = 0;
+	coopConnectionDeactivate();
 	coopEncountersReset(loader);
 	coopObjectsReset();
 	if (hiddenHero && (Level == 21 || Level == 22))
@@ -912,6 +915,7 @@ static void activate(void)
 int moduleInit(const moduleApi_t* api)
 {
 	loader = api;
+	coopConnectionInit(api);
 	moduleExports.magic = COOP_MAGIC;
 	moduleExports.size = sizeof(moduleExports);
 	moduleExports.enabled = 1;
@@ -1089,9 +1093,11 @@ void moduleUpdate(void)
 	u32 original;
 	int i, j, size, local, role, ready, worldSent;
 	u32 heroes, localHero, remoteHero;
+	dlResetBootIdle();
 	refreshHud(0);
 	registerMenu();
 	online = onlineFind(loader);
+	coopConnectionUpdate(online);
 	worldSent = coopEncountersUpdate(loader, online, moduleExports.enabled);
 	worldSent |= coopWorldUpdate(loader, online, moduleExports.enabled);
 	coopObjectsUpdate(loader, online, moduleExports.enabled, coopWorldReady(), 1);
