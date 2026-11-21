@@ -1,4 +1,4 @@
-# Cooperative input experiment
+# Cooperative networking experiment
 
 Optional NTSC-U Deadlocked adapter for the normal-control area of Cooperative
 DreadZone Station (level 21). Tutorial playback, other maps and other regions
@@ -22,14 +22,20 @@ Co-op module's exports and set only `coopControl_t.enabled` to `1`.
 - Start, Select, L3 and R3 stay local so remote input does not open menus.
 - Missing/old input becomes neutral after roughly a quarter second of EE time.
 - Turning the test off/disconnecting restores native controller ownership.
+- Each system sends its locally controlled hero's position. Small remote drift
+  is blended back toward that snapshot; errors over ten units snap back.
+- The host draws player 1's camera/HUD full screen; the guest draws player 2's.
+  Both native heroes still update. Disabling the test restores split-screen.
 
 The adapter chains the native raw-input callbacks and defers to Mod Menu's input
 capture. It verifies the overlay, two-player state, hero lookup and current pad
 ownership before attaching. Unsupported states release its callbacks.
 
-This is **input replication only**. Each game still simulates its own world, and
-both screens remain native split-screen. Starting positions, enemy state,
-damage, objectives, saves and checkpoints are not synchronized or corrected.
+Each game still simulates its own world. Enemy state, damage, objectives, saves
+and checkpoints are not synchronized. Position corrections do not replace
+native collision or synchronize player health, animation state or inventory.
+The position/view additions require matching builds on both systems and are
+awaiting live verification.
 Do not use it as a complete co-op implementation. Disconnect/disable the test
 before travel; level changes and native Online Play are not verified.
 

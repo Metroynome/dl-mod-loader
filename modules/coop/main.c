@@ -22,9 +22,11 @@ typedef struct coopInput {
 	/* 0x00 */ u32 level;
 	/* 0x04 */ int mission;
 	/* 0x08 */ u8 sample[COOP_SAMPLE_BYTES];
+	/* 0x1c */ float position[3];
 } coopInput_t;
 
 static void rawPad(void* controller, u8* sample, int size, void* context);
+static void drawView(int screen, int frustum, int first, int last);
 
 volatile coopControl_t moduleExports DL_MODULE_EXPORTS;
 static const moduleApi_t* loader;
@@ -33,6 +35,9 @@ static const modMenuApi_t* menu;
 static coopPad_t pads[2];
 static u32 remoteTime, sourceSequence, sentSequence;
 static int active, allowInput, sourceValid, remoteValid, tab;
+static int viewInstalled;
+static u32 savedFrustums[20];
+static u32 savedWideFrustums[2];
 static VariableAddress_t vaHeroes = {
 	.Battledome = 0x003660f8
 };
@@ -42,6 +47,118 @@ static VariableAddress_t vaHeroLookup = {
 static VariableAddress_t vaRawPad = {
 	.Battledome = 0x006b5cb8
 };
+static VariableAddress_t vaDrawView = {
+	.Battledome = 0x00529b88
+};
+static VariableAddress_t vaViewCalls = {
+	.Battledome = 0x00549aac
+};
+static VariableAddress_t vaFrustums = {
+	.Battledome = 0x003b65b0
+};
+static VariableAddress_t vaWideFrustums = {
+	.Battledome = 0x003b6790
+};
+
+/*
+ * NAME : drawView
+ * DESCRIPTION : Draw the assigned player's native camera and HUD full screen.
+ * NOTES : Both heroes continue updating normally outside the rendering path.
+ * ARGS : Native screen, frustum and first/last-pass flags.
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+static void drawView(int screen, int frustum, int first, int last)
+{
+	int selected = online && online->role() == ONLINE_JOIN ? 1 : 0;
+	if (screen == selected)
+		((void (*)(int, int, int, int))GetAddressImmediate(&vaDrawView))(screen, 0, 1, 1);
+	(void)frustum;
+	(void)first;
+	(void)last;
+}
+
+/*
+ * NAME : updateView
+ * DESCRIPTION : Install or restore the two verified native view calls.
+ * NOTES : Frustum definitions also supply the native HUD's full-screen bounds.
+ * ARGS : Whether the supported co-op view is active.
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+static void updateView(int enabled)
+{
+	u32 calls = GetAddressImmediate(&vaViewCalls);
+	u32 table = GetAddressImmediate(&vaFrustums);
+	u32 wide = GetAddressImmediate(&vaWideFrustums);
+	u32 native = 0x0c000000 | (GetAddressImmediate(&vaDrawView) >> 2);
+	u32 replacement = 0x0c000000 | ((u32)drawView >> 2);
+	int i;
+	if (!calls || !table || enabled == viewInstalled)
+		return;
+	if (LEVEL != 21) {
+		viewInstalled = 0;
+		return;
+	}
+	if (enabled) {
+		if (WORD(calls) != native || WORD(calls + 0x14) != native)
+			return;
+		for (i = 0; i < 20; ++i) {
+			savedFrustums[i] = WORD(table + 0x28 + i * 4);
+			WORD(table + 0x28 + i * 4) = WORD(table + (i % 10) * 4);
+		}
+		for (i = 0; i < 2; ++i) {
+			savedWideFrustums[i] = WORD(wide + 4 + i * 4);
+			WORD(wide + 4 + i * 4) = 0;
+		}
+		WORD(calls) = WORD(calls + 0x14) = replacement;
+	} else {
+		if (WORD(calls) == replacement)
+			WORD(calls) = native;
+		if (WORD(calls + 0x14) == replacement)
+			WORD(calls + 0x14) = native;
+		for (i = 0; i < 20; ++i)
+			WORD(table + 0x28 + i * 4) = savedFrustums[i];
+		for (i = 0; i < 2; ++i)
+			WORD(wide + 4 + i * 4) = savedWideFrustums[i];
+	}
+	viewInstalled = enabled;
+	loader->flushCache(0);
+	loader->flushCache(2);
+}
+
+/*
+ * NAME : correctPosition
+ * DESCRIPTION : Reconcile the remote hero with its owner's position snapshot.
+ * NOTES : Preserve native movement history; large errors snap, small errors blend.
+ * ARGS : Validated peer snapshot and remote hero address.
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+static void correctPosition(const coopInput_t* frame, u32 hero)
+{
+	float delta[3], distance = 0, scale;
+	u32 moby = WORD(hero + 0x2ef0);
+	int i;
+	if (moby < 0x100000 || moby >= 0x2000000)
+		return;
+	for (i = 0; i < 3; ++i) {
+		/* Ordered comparisons reject NaNs and infinities as well. */
+		if (!(frame->position[i] >= 2 && frame->position[i] <= 1021))
+			return;
+		delta[i] = frame->position[i] - ((float*)(hero + 0xa0))[i];
+		distance += delta[i] * delta[i];
+	}
+	if (!(distance > 0.0025f))
+		return;
+	scale = distance > 100 ? 1 : 0.35f;
+	for (i = 0; i < 3; ++i) {
+		delta[i] *= scale;
+		((float*)(hero + 0xa0))[i] += delta[i];
+		((float*)(hero + 0x110))[i] += delta[i];
+		((float*)(moby + 0x10))[i] += delta[i];
+	}
+}
 
 /*
  * NAME : ticks
@@ -113,6 +230,7 @@ static int supported(void)
 static void releasePads(void)
 {
 	int i;
+	updateView(0);
 	allowInput = sourceValid = remoteValid = 0;
 	for (i = 0; i < 2; ++i) {
 		if (!pads[i].pad || pads[i].pad->RawPadInputCallback != rawPad)
@@ -212,7 +330,7 @@ static void registerMenu(void)
 	modMenuItem_t toggle = {"Co-op Input Test", MODMENU_TOGGLE, (int*)&moduleExports.enabled, 0, 1, 1, 0, 0};
 	modMenuItem_t status = {"Status", MODMENU_RANGE, (int*)&moduleExports.state, COOP_OFF, COOP_ACTIVE, 1, 0, 0};
 	modMenuItem_t help = {"Host: player 1 / Guest: player 2", MODMENU_LABEL, 0, 0, 0, 0, 0, 0};
-	modMenuItem_t scope = {"Station input test; no world sync", MODMENU_LABEL, 0, 0, 0, 0, 0, 0};
+	modMenuItem_t scope = {"Station test; no enemy/objective sync", MODMENU_LABEL, 0, 0, 0, 0, 0, 0};
 	int item;
 	if (tab)
 		return;
@@ -285,7 +403,7 @@ int moduleInit(const moduleApi_t* api)
 /*
  * NAME : moduleUpdate
  * DESCRIPTION : Exchange current pad snapshots through the generic Online API.
- * NOTES : This does not correct positions or synchronize enemies/objectives.
+ * NOTES : Each peer owns its local hero; enemies/objectives remain independent.
  * ARGS :
  * RETURN :
  * AUTHOR : Troy "Metroynome" Pruitt
@@ -295,7 +413,7 @@ void moduleUpdate(void)
 	coopInput_t frame;
 	struct PAD* pad;
 	u32 original;
-	int i, j, size;
+	int i, j, size, local;
 	registerMenu();
 	online = onlineFind(loader);
 	if (!moduleExports.enabled || !online || !online->role() || !supported()) {
@@ -319,6 +437,8 @@ void moduleUpdate(void)
 		allowInput = i == 2;
 	}
 	moduleExports.state = COOP_ACTIVE;
+	updateView(1);
+	local = online->role() == ONLINE_JOIN ? 1 : 0;
 	size = online->receive(COOP_INPUT_CHANNEL, &frame, sizeof(frame));
 	if (size == sizeof(frame) && frame.level == 21 && frame.mission == MISSION && frame.sample[0] == 0) {
 		for (j = 0; j < COOP_SAMPLE_BYTES; ++j)
@@ -326,10 +446,14 @@ void moduleUpdate(void)
 		remoteTime = ticks();
 		remoteValid = 1;
 		++moduleExports.received;
+		if (allowInput)
+			correctPosition(&frame, WORD(GetAddressImmediate(&vaHeroes) + (1 - local) * 4));
 	}
 	moduleExports.stale = !remoteValid || ticks() - remoteTime >= INPUT_TIMEOUT;
 	frame.level = 21;
 	frame.mission = MISSION;
+	for (j = 0; j < 3; ++j)
+		frame.position[j] = ((float*)(WORD(GetAddressImmediate(&vaHeroes) + local * 4) + 0xa0))[j];
 	if (!sourceValid) {
 		neutral(frame.sample);
 	} else {
