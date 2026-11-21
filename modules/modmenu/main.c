@@ -48,6 +48,7 @@ static int itemShown(const item_t* item);
 static void selectItem(int direction);
 static int isOpen(void);
 static void closeMenu(void);
+static void returnToGame(void);
 static int getActiveTab(void);
 static int focusTab(int tab);
 static int setList(int tab, int count, ModMenuListLabel label, ModMenuListSelect select, void* context, int initial);
@@ -66,6 +67,9 @@ static char progressLabel[64];
 static int progressCurrent, progressTotal, progressPulse;
 static int nextHandle = 1, opened, selectedTab, selectedItem, lastLevel = -999;
 static u32 previousButtons, previousMode, previousContext, closingButtons;
+static u32 repeatButton, repeatStart, repeatTime;
+static int repeatItem;
+static int resumeRequested;
 static const modMenuApi_t menuApi = {
 	MODMENU_API_VERSION,
 	sizeof(modMenuApi_t),
@@ -89,7 +93,8 @@ static const modMenuApi_t menuApi = {
 	menuBackendText,
 	setTabAction,
 	setItemValueLabel,
-	setItemButtons
+	setItemButtons,
+	returnToGame
 };
 /* A window of whole tabs: measured text plus Horizon-style padding. Scroll
  * the first visible tab only when the focused tab would fall outside it. */
@@ -305,6 +310,20 @@ static void closeMenu(void)
 	closingButtons = previousButtons;
 }
 
+/*
+ * NAME : returnToGame
+ * DESCRIPTION : Close the overlay and request the native Continue action.
+ * NOTES : Wait for the activating buttons to release before unpausing.
+ * ARGS :
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+static void returnToGame(void)
+{
+	closeMenu();
+	resumeRequested = 1;
+}
+
 static int getActiveTab(void)
 {
 	return selectedTab;
@@ -490,7 +509,7 @@ static void selectPage(int direction)
 	}
 }
 
-static void activate(int direction)
+static void activate(int direction, int multiplier)
 {
 	int i = tabIndex(selectedTab);
 	ModMenuCallback callback;
@@ -512,6 +531,8 @@ static void activate(int direction)
 					return;
 				if (direction) {
 					item->buttonCursor = (item->buttonCursor + direction + item->buttonCount) % item->buttonCount;
+					if (item->buttonCount > 1)
+						menuBackendAdjust();
 				} else {
 					modMenuButton_t button = item->buttons[item->buttonCursor];
 					button.callback(button.context);
@@ -520,15 +541,21 @@ static void activate(int direction)
 			}
 			callback = d->callback;
 			context = d->context;
-			if (d->type == MODMENU_TOGGLE)
+			if (d->type == MODMENU_TOGGLE) {
 				*d->value = !*d->value;
-			else if (d->type == MODMENU_RANGE) {
-				long long next = (long long)*d->value + (direction < 0 ? -(long long)d->step : d->step);
+				if (direction)
+					menuBackendAdjust();
+			} else if (d->type == MODMENU_RANGE) {
+				int previous = *d->value;
+				long long step = (long long)d->step * multiplier;
+				long long next = (long long)*d->value + (direction < 0 ? -step : step);
 				if (items[i].valueLabel)
 					value = next < d->minimum ? d->maximum : next > d->maximum ? d->minimum : (int)next;
 				else
 					value = next < d->minimum ? d->minimum : next > d->maximum ? d->maximum : (int)next;
 				*d->value = value;
+				if (direction && value != previous)
+					menuBackendAdjust();
 			} else if (d->type != MODMENU_ACTION || direction < 0)
 				return;
 			/* Copy callback/context first: callbacks may unregister their own tab. */
@@ -536,6 +563,48 @@ static void activate(int direction)
 				callback(context);
 			return;
 		}
+}
+
+/*
+ * NAME : repeatRange
+ * DESCRIPTION : Repeat held left/right adjustments on plain numeric fields.
+ * NOTES : Pressure increases repeat rate; long holds accelerate large ranges.
+ * ARGS : Held and newly pressed menu buttons.
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+static void repeatRange(u32 buttons, u32 pressed)
+{
+	u32 now, button = buttons & 0xa0;
+	int i, pressure, multiplier = 1;
+	if (button != 0x20 && button != 0x80) {
+		repeatButton = 0;
+		return;
+	}
+	for (i = 0; i < MODMENU_MAX_ITEMS; ++i)
+		if (items[i].handle == selectedItem && selectedItem)
+			break;
+	if (i == MODMENU_MAX_ITEMS || !items[i].enabled || items[i].definition.type != MODMENU_RANGE || items[i].valueLabel) {
+		repeatButton = 0;
+		return;
+	}
+	__asm__ volatile("mfc0 %0, $9" : "=r"(now));
+	if (repeatButton != button || repeatItem != selectedItem || (pressed & button)) {
+		repeatButton = button;
+		repeatItem = selectedItem;
+		repeatStart = repeatTime = now;
+		return;
+	}
+	pressure = menuBackendPressure(button);
+	if (now - repeatStart < 90000000 || now - repeatTime < (u32)(15000000 - pressure * 45000))
+		return;
+	repeatTime = now;
+	if ((long long)items[i].definition.maximum - items[i].definition.minimum > 255) {
+		multiplier += pressure / 32;
+		if (now - repeatStart > 900000000)
+			multiplier *= 10;
+	}
+	activate(button == 0x80 ? -1 : 1, multiplier);
 }
 
 static void number(char* dst, int value)
@@ -800,6 +869,7 @@ static void draw(void)
 
 static void deactivate(void)
 {
+	resumeRequested = 0;
 	progressLabel[0] = 0;
 	closeMenu();
 	menuBackendDeactivate();
@@ -858,6 +928,7 @@ static void updateMenu(void)
 	}
 	menuBackendPause(loader->mode, openFromPause);
 	if (modal && (modalStarted || menuBackendPopupReady(loader->mode))) {
+		repeatButton = 0;
 		modalStarted = 1;
 		menuBackendCapture(loader->mode);
 		if (!modal(buttons & ~previousButtons)) {
@@ -868,6 +939,7 @@ static void updateMenu(void)
 		return;
 	}
 	if (progressLabel[0]) {
+		repeatButton = 0;
 		menuBackendCapture(loader->mode);
 		previousButtons = buttons;
 		drawProgress();
@@ -884,6 +956,7 @@ static void updateMenu(void)
 	}
 	previousButtons = buttons;
 	if (!opened) {
+		repeatButton = 0;
 		if (buttons & closingButtons)
 			menuBackendCapture(loader->mode);
 		else {
@@ -929,11 +1002,12 @@ static void updateMenu(void)
 			menuBackendNavigate();
 	}
 	if (pressed & 0x80)
-		activate(-1);
+		activate(-1, 1);
 	else if (pressed & 0x20)
-		activate(1);
+		activate(1, 1);
 	else if (pressed & 0x4000)
-		activate(0);
+		activate(0, 1);
+	repeatRange(buttons, pressed);
 	if (opened)
 		draw();
 }
@@ -941,6 +1015,10 @@ static void updateMenu(void)
 void moduleUpdate(void)
 {
 	menuBackendUpdate(loader->mode, updateMenu);
+	if (resumeRequested && !opened && !closingButtons) {
+		resumeRequested = 0;
+		menuBackendResume();
+	}
 }
 
 /* GCC may lower aggregate initialization to memset even in freestanding code. */

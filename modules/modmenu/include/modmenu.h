@@ -96,6 +96,8 @@ typedef struct modMenuApi {
 	/* 0x54 */ int (*setItemValueLabel)(int item, ModMenuListLabel label);
 	/* Button rows copy labels/callbacks; an empty label centers the buttons. */
 	/* 0x58 */ int (*setItemButtons)(int item, const modMenuButton_t* buttons, int count);
+	/* Close the overlay and resume native gameplay after its buttons release. */
+	/* 0x5c */ void (*returnToGame)(void);
 } modMenuApi_t;
 
 /* Look this up again after mode changes; absence is normal, not fatal.
