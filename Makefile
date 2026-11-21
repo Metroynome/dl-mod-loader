@@ -35,10 +35,14 @@ _region:
 	  cp "$$work/publish/$$name.$(REGION).bin" hostfs/dl/mods/; \
 	  cp "$$work/publish/$$name.$(REGION).bin" build/dist/hostfs/dl/mods/; \
 	done < build/catalog.txt
-_assets: build/mapscan/mapscan.irx
+_assets: build/mapscan/mapscan.irx build/online/online.irx
 	@mkdir -p hostfs/dl/mods/utils build/dist/hostfs/dl/mods/utils build/dist/hostfs/dl/mods/debug build/dist/hostfs/dl/config
 	cp $< hostfs/dl/mods/utils/
 	cp $< build/dist/hostfs/dl/mods/utils/
+	@mkdir -p hostfs/dl/mods/utils/online build/dist/hostfs/dl/mods/utils/online
+	cp build/online/online.irx $(addprefix $(PS2SDK)/iop/irx/,ps2dev9.irx netman.irx smap.irx ps2ip-nm.irx) hostfs/dl/mods/utils/online/
+	cp $(PS2SDK)/LICENSE hostfs/dl/mods/utils/online/PS2SDK-LICENSE.txt
+	cp hostfs/dl/mods/utils/online/* build/dist/hostfs/dl/mods/utils/online/
 	@set -eu; dest=build/dist/hostfs/dl; \
 	for list in modules.txt config/modules.txt mods/debug/exceptionhandler.bin; do \
 	  if test -f "hostfs/dl/$$list"; then cp "hostfs/dl/$$list" "$$dest/$$list"; else rm -f "$$dest/$$list"; fi; \
@@ -52,6 +56,11 @@ build/mapscan/mapscan.irx: $(wildcard iop/mapscan/*) include/mapscan.h
 	mkdir -p build/mapscan
 	cp -R iop/mapscan/. build/mapscan/
 	$(MAKE) -C build/mapscan
+
+build/online/online.irx: $(wildcard modules/online/iop/*) modules/online/transport.h include/module.h include/types.h
+	mkdir -p build/online
+	cp -R modules/online/iop/. build/online/
+	$(MAKE) -C build/online
 
 release:
 	$(MAKE) all REGION=all NAME=

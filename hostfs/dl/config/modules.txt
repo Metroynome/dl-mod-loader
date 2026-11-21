@@ -6,3 +6,5 @@ menu-example 0
 hello 0
 campaign-test 0
 multiplayer-test 0
+online disabled // choose campaign, local, online, or a supported combination
+coop disabled // choose campaign, local, online, or a supported combination

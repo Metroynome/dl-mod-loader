@@ -1,0 +1,4 @@
+LIBRARY = none
+REGIONS = ntscu
+MODE = campaign
+EE_OBJS = main.o transport.o strings.o

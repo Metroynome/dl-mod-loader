@@ -1,0 +1,3 @@
+LIBRARY = librac4
+REGIONS = ntscu
+EE_OBJS = main.o
