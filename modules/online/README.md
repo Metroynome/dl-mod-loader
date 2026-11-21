@@ -19,13 +19,20 @@ list leaves it disabled. Mod Menu and expanded RAM are not required.
 
 Load a campaign/Cooperative save first. In MOD MENU → Online:
 
-- On the host, choose a Local Port and select Host.
+- On the host, select Host. It listens on Host Port (default `25565`).
 - On the guest, enter the host's four IPv4 bytes and Host Port, then select Join.
-- Use a different Local Port on the guest when both emulators run on one PC.
-  For example, host `28600`, guest `28601`, Host Port `28600`.
+- Host returns to gameplay once listening; Join returns once connected. Failed
+  requests leave the menu open for correction or retry.
+- Defaults are host IP `192.168.1.190`, Host Port `25565`, and guest Local Port
+  `25566`. These let the two test emulators connect on the same PC unchanged.
+- Hold Left/Right on numeric fields to repeat. D-pad pressure increases the
+  repeat speed, and long holds accelerate large numbers such as ports.
 - Connected means the handshake and peer heartbeats work. Disconnect closes the
-  socket; it does not exit campaign. A timed-out connection can be disconnected
-  before retrying. Driver/RPC startup failures require a cold restart.
+  socket; it does not exit campaign. After a failed connection, select Join or
+  Host directly to retry. Driver/RPC startup failures still require a cold restart.
+- If the guest disconnects or times out, the host keeps listening. The same
+  guest endpoint can reconnect immediately; a different endpoint waits for the
+  previous connection to time out. Disconnect on the host stops hosting.
 
 With PCSX2's Sockets backend, enter the host PC's LAN IP, not its emulated
 `192.0.2.100` address. Hosting sends a small, ignored LAN probe periodically so

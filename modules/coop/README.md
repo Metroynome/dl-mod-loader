@@ -20,12 +20,18 @@ Co-op module's exports and set only `coopControl_t.enabled` to `1`.
 - Host controller 1 controls player 1 locally and sends that input to the guest.
 - Guest controller 1 controls player 2 locally and sends that input to the host.
 - Start, Select, L3 and R3 stay local so remote input does not open menus.
+- Pause, vendors, scenes and Mod Menu send neutral gameplay controls. Local
+  menu navigation remains available; corrections wait until normal gameplay.
 - Missing/old input becomes neutral after roughly a quarter second of EE time.
 - Turning the test off/disconnecting restores native controller ownership.
 - Each system sends its locally controlled hero's position. Small remote drift
   is blended back toward that snapshot; errors over ten units snap back.
+- Corrections also update the native movement reference so the next frame
+  preserves them, including when players start at different positions.
 - The host draws player 1's camera/HUD full screen; the guest draws player 2's.
   Both native heroes still update. Disabling the test restores split-screen.
+- Station's unused D-pad panel is hidden while the test is active; the original
+  full-screen panel template is retained for levels that use it.
 
 The adapter chains the native raw-input callbacks and defers to Mod Menu's input
 capture. It verifies the overlay, two-player state, hero lookup and current pad

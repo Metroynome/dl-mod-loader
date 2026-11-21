@@ -6,14 +6,17 @@
 int menuBackendReady(u32 mode);
 void menuBackendUpdate(u32 mode, void (*update)(void));
 u32 menuBackendButtons(u32 mode);
+int menuBackendPressure(u32 button);
 void menuBackendCapture(u32 mode);
 void menuBackendRelease(void);
+void menuBackendResume(void);
 void menuBackendDeactivate(void);
 void menuBackendBox(float x, float y, float width, float height, u32 color);
 void menuBackendText(float x, float y, u32 color, const char* text);
 float menuBackendWidth(const char* text);
 int menuBackendLevel(void);
 void menuBackendNavigate(void);
+void menuBackendAdjust(void);
 int menuBackendPopupReady(u32 mode);
 void menuBackendPause(u32 mode, void (*openMenu)(void));
 #endif

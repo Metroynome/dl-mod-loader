@@ -44,10 +44,25 @@ static onlineRpc_t operation;
 static u32 pollTime, sendTime, receivedTime, startTime, clientToken, hostToken, peerAddress;
 static u16 peerPort;
 static int role, phase, waiting, active, stopping, tab;
-static int hostPort = 28600, localPort = 28600, ip[4] = {192, 168, 1, 100};
+static int hostPort = 25565, localPort = 25566, ip[4] = {192, 168, 1, 190};
 static onlineMessage_t outgoing, incoming;
 static u32 sendSequence, receiveSequence;
 static int outgoingReady, incomingReady, peerConfirmed;
+static int returnAfterStart;
+
+/*
+ * NAME : resetMessages
+ * DESCRIPTION : Discard snapshots and sequence state from the previous peer session.
+ * NOTES : A reconnect must complete its handshake before sending adapter data.
+ * ARGS :
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+static void resetMessages(void)
+{
+	outgoingReady = incomingReady = peerConfirmed = 0;
+	sendSequence = receiveSequence = 0;
+}
 
 /*
  * NAME : sessionRole
@@ -134,7 +149,7 @@ static const char* stateLabel(void* unused, int value)
 /*
  * NAME : begin
  * DESCRIPTION : Begin an asynchronous host or join request.
- * NOTES : One peer only; native Horizon/Multiplayer sessions are not used.
+ * NOTES : Failed sessions may retry; opening the new socket closes the old one.
  * ARGS : Role, destination IP/port and local UDP port.
  * RETURN : Zero accepted, negative invalid/busy/context.
  * AUTHOR : Troy "Metroynome" Pruitt
@@ -143,7 +158,7 @@ static int begin(int nextRole, u32 address, u16 port, u16 bindPort)
 {
 	if (!active || loader->context != DL_CONTEXT_CAMPAIGN || !onlineTransportSupported())
 		return -1;
-	if (waiting || stopping || moduleExports.status != ONLINE_IDLE || !bindPort ||
+	if (waiting || stopping || (moduleExports.status != ONLINE_IDLE && moduleExports.status != ONLINE_FAILED) || !bindPort ||
 	    (nextRole == ONLINE_JOIN && (!address || !port)))
 		return -2;
 	role = nextRole;
@@ -154,9 +169,7 @@ static int begin(int nextRole, u32 address, u16 port, u16 bindPort)
 	moduleExports.sent = moduleExports.received = 0;
 	moduleExports.status = ONLINE_STARTING;
 	phase = waiting = stopping = 0;
-	outgoingReady = incomingReady = 0;
-	peerConfirmed = 0;
-	sendSequence = receiveSequence = 0;
+	resetMessages();
 	startTime = ticks();
 	clientToken = (startTime ^ ((u32)&moduleExports >> 4) ^ bindPort) | 1;
 	hostToken = nextRole == ONLINE_HOST ? clientToken : 0;
@@ -174,7 +187,8 @@ static int begin(int nextRole, u32 address, u16 port, u16 bindPort)
 static void command(void* context)
 {
 	moduleExports.command = (u32)context;
-	moduleExports.localPort = localPort;
+	returnAfterStart = moduleExports.command == ONLINE_HOST || moduleExports.command == ONLINE_JOIN;
+	moduleExports.localPort = moduleExports.command == ONLINE_HOST ? hostPort : localPort;
 	moduleExports.hostPort = hostPort;
 	moduleExports.hostAddress = ip[0] | (ip[1] << 8) | (ip[2] << 16) | ((u32)ip[3] << 24);
 	moduleExports.requestId = moduleExports.acceptedId + 1;
@@ -200,7 +214,7 @@ static void registerMenu(void)
 	modMenuItem_t status = {"Connection", MODMENU_RANGE, (int*)&moduleExports.status, ONLINE_IDLE, ONLINE_FAILED, 1, 0, 0};
 	modMenuItem_t port = {"Host Port", MODMENU_RANGE, &hostPort, 1024, 65535, 1, 0, 0};
 	modMenuItem_t bind = {"Local Port", MODMENU_RANGE, &localPort, 1024, 65535, 1, 0, 0};
-	modMenuItem_t info = {"Connection test; no co-op sync yet", MODMENU_LABEL, 0, 0, 0, 0, 0, 0};
+	modMenuItem_t info = {"Host uses Host Port; Join uses Local Port", MODMENU_LABEL, 0, 0, 0, 0, 0, 0};
 	int i, item;
 	if (tab)
 		return;
@@ -263,7 +277,12 @@ static void receivePacket(const onlineRpc_t* reply, u32 now)
 	}
 	if (reply->length != sizeof(packet))
 		return;
-	if (role == ONLINE_HOST && moduleExports.status == ONLINE_HOSTING && packet.kind == HELLO && packet.clientToken) {
+	if (role == ONLINE_HOST && packet.kind == HELLO && packet.clientToken && !packet.hostToken) {
+		if (moduleExports.status != ONLINE_HOSTING &&
+		    (moduleExports.status != ONLINE_CONNECTED || reply->address != peerAddress || reply->port != peerPort))
+			return;
+		if (moduleExports.status == ONLINE_HOSTING || clientToken != packet.clientToken)
+			resetMessages();
 		peerAddress = reply->address;
 		peerPort = reply->port;
 		clientToken = packet.clientToken;
@@ -340,7 +359,9 @@ int moduleInit(const moduleApi_t* api)
 	onlineTransportInit(api);
 	moduleExports.magic = ONLINE_MAGIC;
 	moduleExports.size = sizeof(moduleExports);
-	moduleExports.localPort = moduleExports.hostPort = 28600;
+	moduleExports.localPort = localPort;
+	moduleExports.hostPort = hostPort;
+	moduleExports.hostAddress = ip[0] | (ip[1] << 8) | (ip[2] << 16) | ((u32)ip[3] << 24);
 	api->setLifecycle(activate, deactivate);
 	return api->publishService(ONLINE_SERVICE_ID, ONLINE_API_VERSION, &onlineApi);
 }
@@ -397,6 +418,12 @@ void moduleUpdate(void)
 			moduleExports.status = ONLINE_IDLE;
 		}
 	}
+	if (returnAfterStart && ((role == ONLINE_HOST && moduleExports.status == ONLINE_HOSTING) ||
+	                        moduleExports.status == ONLINE_CONNECTED)) {
+		returnAfterStart = 0;
+		if (menu)
+			menu->returnToGame();
+	}
 	if (moduleExports.status == ONLINE_STARTING) {
 		result = onlineTransportReady();
 		if (!result)
@@ -426,9 +453,16 @@ void moduleUpdate(void)
 		return;
 	if ((moduleExports.status == ONLINE_ADDRESS && now - startTime > TIMEOUT) ||
 	    ((moduleExports.status == ONLINE_CONNECTING || moduleExports.status == ONLINE_CONNECTED) && now - receivedTime > TIMEOUT)) {
-		moduleExports.error = -6;
-		moduleExports.status = ONLINE_FAILED;
-		return;
+		if (role == ONLINE_HOST && moduleExports.status == ONLINE_CONNECTED) {
+			peerAddress = peerPort = clientToken = 0;
+			resetMessages();
+			moduleExports.status = ONLINE_HOSTING;
+			moduleExports.error = 0;
+		} else {
+			moduleExports.error = -6;
+			moduleExports.status = ONLINE_FAILED;
+			return;
+		}
 	}
 	if (now - pollTime < POLL_INTERVAL)
 		return;

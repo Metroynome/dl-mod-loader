@@ -164,6 +164,27 @@ u32 menuBackendButtons(u32 mode)
 	return (~(sample[2] | (sample[3] << 8))) & 0xffff;
 }
 
+/*
+ * NAME : menuBackendPressure
+ * DESCRIPTION : Read D-pad pressure from the same sample used by menu input.
+ * NOTES : Digital-only controllers use medium pressure for held scrolling.
+ * ARGS : Left or right D-pad button.
+ * RETURN : Pressure from 0 through 255.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+int menuBackendPressure(u32 button)
+{
+	struct PAD* pad = currentPad(0);
+	const u8* sample;
+	int index = button == 0x20 ? 8 : button == 0x80 ? 9 : -1;
+	if (!ready || !pad || index < 0)
+		return 0;
+	sample = captured[0].pad == pad ? captured[0].sample : pad->rdata;
+	if ((sample[2] | (sample[3] << 8)) & button)
+		return 0;
+	return sample[1] == 0x79 && sample[index] ? sample[index] : 128;
+}
+
 void menuBackendCapture(u32 mode)
 {
 	int i, j;
@@ -191,6 +212,27 @@ void menuBackendCapture(u32 mode)
 		for (j = 2; j < 32; ++j)
 			pad->rdata[j] = j < 4 ? 255 : j < 8 ? 127 : 0;
 	}
+}
+
+/*
+ * NAME : menuBackendResume
+ * DESCRIPTION : Invoke the campaign Continue action for the local menu player.
+ * NOTES : Decode its verified CloseMenu call rather than duplicating regional tables.
+ * ARGS :
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+void menuBackendResume(void)
+{
+	u32 address, call;
+	if (!ready || currentMode != DL_MODE_CAMPAIGN)
+		return;
+	address = GetAddressImmediate(&vaPauseClose);
+	if (!address || WORD(address) != 0x27bdfff0 || WORD(address + 0x40) != 0x2405ffff)
+		return;
+	call = WORD(address + 0x3c);
+	if ((call >> 26) == 3)
+		((void (*)(int, int))((call & 0x03ffffff) << 2))(0, -1);
 }
 
 void menuBackendRelease(void)
@@ -305,6 +347,32 @@ void menuBackendDeactivate(void)
 	updateMenu = 0;
 	ready = 0;
 	openPauseMenu = 0;
+}
+
+/*
+ * NAME : menuBackendAdjust
+ * DESCRIPTION : Play the native Music Volume left/right adjustment sound.
+ * NOTES : Campaign uses the verified Continue wrapper's GuiMain sound call.
+ * ARGS :
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+void menuBackendAdjust(void)
+{
+	u32 address, call;
+	if (!ready)
+		return;
+	if (currentMode == DL_MODE_CAMPAIGN) {
+		address = GetAddressImmediate(&vaPauseClose);
+		if (!address || WORD(address) != 0x27bdfff0 || WORD(address + 0x2c) != 0x24040005)
+			return;
+		call = WORD(address + 0x28);
+		if ((call >> 26) == 3)
+			((void (*)(int))((call & 0x03ffffff) << 2))(0x11);
+	} else if (DL_MODULE_REGION == 1) {
+		address = multiplayerGameCode() ? 0x58f918 : 0x66d468;
+		((void (*)(int, int, void*))address)(0x11, 0, 0);
+	}
 }
 
 /*

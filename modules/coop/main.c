@@ -3,6 +3,7 @@
 #include "modules/modmenu/include/modmenu.h"
 #include <librac4/interop.h>
 #include <librac4/pad.h>
+#include <librac4/game.h>
 
 #define LEVEL (*(volatile int*)0x0021de10)
 #define MISSION (*(volatile int*)0x001711a8)
@@ -10,6 +11,7 @@
 #define WORD(address) (*(volatile u32*)(address))
 #define INPUT_TIMEOUT (75000000)
 #define MENU_BUTTONS (PAD_START | PAD_SELECT | PAD_L3 | PAD_R3)
+#define HUD_DPAD (0x08)
 
 typedef void (*rawPadCallback_t)(void*, u8*, int, void*);
 
@@ -38,6 +40,10 @@ static int active, allowInput, sourceValid, remoteValid, tab;
 static int viewInstalled;
 static u32 savedFrustums[20];
 static u32 savedWideFrustums[2];
+static u32 savedGuiLayout[6];
+static u32 savedDpadPanels[2];
+static u32 hudPanels[2];
+static const u8 guiLayoutOffsets[] = {0x0c, 0x20, 0x24};
 static VariableAddress_t vaHeroes = {
 	.Battledome = 0x003660f8
 };
@@ -51,6 +57,9 @@ static VariableAddress_t vaDrawView = {
 	.Battledome = 0x00529b88
 };
 static VariableAddress_t vaViewCalls = {
+	.Battledome = 0x0052a0d0
+};
+static VariableAddress_t vaPausedViewCalls = {
 	.Battledome = 0x00549aac
 };
 static VariableAddress_t vaFrustums = {
@@ -59,6 +68,58 @@ static VariableAddress_t vaFrustums = {
 static VariableAddress_t vaWideFrustums = {
 	.Battledome = 0x003b6790
 };
+static VariableAddress_t vaGameMode = {
+	.Battledome = 0x0021ddb4
+};
+static VariableAddress_t vaGuiPlayers = {
+	.Battledome = 0x0031b2f8
+};
+static VariableAddress_t vaHudPlayers = {
+	.Battledome = 0x0032ed60
+};
+
+/*
+ * NAME : refreshHud
+ * DESCRIPTION : Recreate cached HUD panels using the current player layout.
+ * NOTES : Use each panel's original full-screen template, including the D-pad.
+ * ARGS : Nonzero to request one refresh after a layout change.
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+static void refreshHud(int rebuild)
+{
+	u32 data = GetAddressImmediate(&vaHudPlayers);
+	int i;
+	if (LEVEL != 21 || !data) {
+		hudPanels[0] = hudPanels[1] = 0;
+		return;
+	}
+	for (i = 0; i < 2; ++i) {
+		u32 player = data + i * 0x10;
+		if (rebuild && !hudPanels[i] && WORD(player + 4)) {
+			hudPanels[i] = WORD(player + 4);
+			WORD(player + 4) = 0;
+		} else if (hudPanels[i] && !WORD(player + 8) && !WORD(player + 0x0c)) {
+			if (!WORD(player + 4))
+				WORD(player + 4) = hudPanels[i];
+			hudPanels[i] = 0;
+		}
+	}
+}
+
+/*
+ * NAME : gameplayInput
+ * DESCRIPTION : Allow player controls only during native normal gameplay.
+ * NOTES : Pause, vendors, scenes and Mod Menu keep their input local.
+ * ARGS :
+ * RETURN : Nonzero when gameplay owns the controls.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+static int gameplayInput(void)
+{
+	u32 address = GetAddressImmediate(&vaGameMode);
+	return LEVEL == 21 && address && WORD(address) == GAME_MODE_NORMAL && !(menu && menu->isOpen());
+}
 
 /*
  * NAME : drawView
@@ -80,29 +141,34 @@ static void drawView(int screen, int frustum, int first, int last)
 
 /*
  * NAME : updateView
- * DESCRIPTION : Install or restore the two verified native view calls.
- * NOTES : Frustum definitions also supply the native HUD's full-screen bounds.
+ * DESCRIPTION : Install or restore normal and paused co-op view calls.
+ * NOTES : Frustums and per-player GUI records supply full-screen HUD bounds.
  * ARGS : Whether the supported co-op view is active.
  * RETURN :
  * AUTHOR : Troy "Metroynome" Pruitt
  */
 static void updateView(int enabled)
 {
-	u32 calls = GetAddressImmediate(&vaViewCalls);
+	u32 normal = GetAddressImmediate(&vaViewCalls);
+	u32 paused = GetAddressImmediate(&vaPausedViewCalls);
+	u32 calls[4] = {normal, normal + 0x1c, paused, paused + 0x14};
 	u32 table = GetAddressImmediate(&vaFrustums);
 	u32 wide = GetAddressImmediate(&vaWideFrustums);
+	u32 gui = GetAddressImmediate(&vaGuiPlayers);
+	u32 hud = GetAddressImmediate(&vaHudPlayers);
 	u32 native = 0x0c000000 | (GetAddressImmediate(&vaDrawView) >> 2);
 	u32 replacement = 0x0c000000 | ((u32)drawView >> 2);
 	int i;
-	if (!calls || !table || enabled == viewInstalled)
-		return;
 	if (LEVEL != 21) {
 		viewInstalled = 0;
 		return;
 	}
+	if (!normal || !paused || !table || enabled == viewInstalled)
+		return;
 	if (enabled) {
-		if (WORD(calls) != native || WORD(calls + 0x14) != native)
-			return;
+		for (i = 0; i < 4; ++i)
+			if (WORD(calls[i]) != native)
+				return;
 		for (i = 0; i < 20; ++i) {
 			savedFrustums[i] = WORD(table + 0x28 + i * 4);
 			WORD(table + 0x28 + i * 4) = WORD(table + (i % 10) * 4);
@@ -111,18 +177,36 @@ static void updateView(int enabled)
 			savedWideFrustums[i] = WORD(wide + 4 + i * 4);
 			WORD(wide + 4 + i * 4) = 0;
 		}
-		WORD(calls) = WORD(calls + 0x14) = replacement;
+		/* Native GuiMain_PlayerData stride is 0x54. Change only screen mode
+		 * and canvas offsets; preserve each player's menu/HUD ownership. */
+		for (i = 0; i < 6; ++i) {
+			u32 field = gui + (i / 3) * 0x54 + guiLayoutOffsets[i % 3];
+			savedGuiLayout[i] = WORD(field);
+			WORD(field) = 0;
+		}
+		/* Station has no usable D-pad actions. Keep the original full-screen
+		 * template for other levels; suppress only this verified overlay. */
+		for (i = 0; i < 2; ++i) {
+			savedDpadPanels[i] = WORD(hud + i * 0x10 + 4) & HUD_DPAD;
+			WORD(hud + i * 0x10 + 4) &= ~HUD_DPAD;
+		}
+		for (i = 0; i < 4; ++i)
+			WORD(calls[i]) = replacement;
 	} else {
-		if (WORD(calls) == replacement)
-			WORD(calls) = native;
-		if (WORD(calls + 0x14) == replacement)
-			WORD(calls + 0x14) = native;
+		for (i = 0; i < 4; ++i)
+			if (WORD(calls[i]) == replacement)
+				WORD(calls[i]) = native;
 		for (i = 0; i < 20; ++i)
 			WORD(table + 0x28 + i * 4) = savedFrustums[i];
 		for (i = 0; i < 2; ++i)
 			WORD(wide + 4 + i * 4) = savedWideFrustums[i];
+		for (i = 0; i < 6; ++i)
+			WORD(gui + (i / 3) * 0x54 + guiLayoutOffsets[i % 3]) = savedGuiLayout[i];
+		for (i = 0; i < 2; ++i)
+			WORD(hud + i * 0x10 + 4) |= savedDpadPanels[i];
 	}
 	viewInstalled = enabled;
+	refreshHud(1);
 	loader->flushCache(0);
 	loader->flushCache(2);
 }
@@ -156,6 +240,7 @@ static void correctPosition(const coopInput_t* frame, u32 hero)
 		delta[i] *= scale;
 		((float*)(hero + 0xa0))[i] += delta[i];
 		((float*)(hero + 0x110))[i] += delta[i];
+		((float*)(hero + 0x2f04))[i] += delta[i];
 		((float*)(moby + 0x10))[i] += delta[i];
 	}
 }
@@ -255,7 +340,7 @@ static void rawPad(void* controller, u8* sample, int size, void* context)
 	const volatile u8* replacement = 0;
 	u8 idle[COOP_SAMPLE_BYTES];
 	u16 localMenu;
-	int i, j, role, usable;
+	int i, j, role, usable, gameplay;
 	for (i = 0; i < 2; ++i) {
 		if (pads[i].pad != controller)
 			continue;
@@ -269,16 +354,21 @@ static void rawPad(void* controller, u8* sample, int size, void* context)
 		}
 		if (usable && pads[i].pad && pads[i].pad->RawPadInputCallback == rawPad && size >= 8 && sample[0] == 0) {
 			localMenu = (sample[2] | (sample[3] << 8)) & MENU_BUTTONS;
-			if (i == 0) {
+			gameplay = gameplayInput();
+			if (i == 0 && gameplay && (localMenu & PAD_START)) {
 				for (j = 0; j < COOP_SAMPLE_BYTES; ++j)
 					moduleExports.sourceSample[j] = j < size ? sample[j] : 0;
 				moduleExports.sourceSample[2] |= MENU_BUTTONS & 255;
 				moduleExports.sourceSample[3] |= MENU_BUTTONS >> 8;
 				++sourceSequence;
 				sourceValid = 1;
+			} else if (i == 0) {
+				sourceValid = 0;
 			}
 			neutral(idle);
-			if (role == ONLINE_HOST && i == 1)
+			if (!gameplay)
+				replacement = i == 1 ? idle : 0;
+			else if (role == ONLINE_HOST && i == 1)
 				replacement = remoteValid && ticks() - remoteTime < INPUT_TIMEOUT ? moduleExports.remoteSample : idle;
 			else if (role == ONLINE_JOIN)
 				replacement = i == 1 ? (sourceValid ? moduleExports.sourceSample : idle) :
@@ -414,6 +504,7 @@ void moduleUpdate(void)
 	struct PAD* pad;
 	u32 original;
 	int i, j, size, local;
+	refreshHud(0);
 	registerMenu();
 	online = onlineFind(loader);
 	if (!moduleExports.enabled || !online || !online->role() || !supported()) {
@@ -438,6 +529,8 @@ void moduleUpdate(void)
 	}
 	moduleExports.state = COOP_ACTIVE;
 	updateView(1);
+	if (!gameplayInput())
+		sourceValid = 0;
 	local = online->role() == ONLINE_JOIN ? 1 : 0;
 	size = online->receive(COOP_INPUT_CHANNEL, &frame, sizeof(frame));
 	if (size == sizeof(frame) && frame.level == 21 && frame.mission == MISSION && frame.sample[0] == 0) {
@@ -446,7 +539,7 @@ void moduleUpdate(void)
 		remoteTime = ticks();
 		remoteValid = 1;
 		++moduleExports.received;
-		if (allowInput)
+		if (allowInput && gameplayInput())
 			correctPosition(&frame, WORD(GetAddressImmediate(&vaHeroes) + (1 - local) * 4));
 	}
 	moduleExports.stale = !remoteValid || ticks() - remoteTime >= INPUT_TIMEOUT;
