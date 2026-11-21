@@ -7,7 +7,7 @@
 #define WELCOME (2)
 #define KEEPALIVE (3)
 #define MESSAGE (4)
-#define PROTOCOL_VERSION (2)
+#define PROTOCOL_VERSION (3)
 #define POLL_INTERVAL (4000000)
 #define SEND_INTERVAL (90000000)
 #define TIMEOUT (1500000000)
@@ -88,6 +88,10 @@ static int sessionRole(void)
 static int sendMessage(u32 channel, const void* data, int size)
 {
 	if (!sessionRole() || !channel || !data || size <= 0 || size > ONLINE_MESSAGE_BYTES)
+		return -1;
+	/* Preserve another channel's queued packet until the IOP consumes it.
+	 * Input on the same channel still keeps only its newest snapshot. */
+	if (outgoingReady && outgoing.channel != channel)
 		return -1;
 	outgoing.channel = channel;
 	outgoing.length = size;

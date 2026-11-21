@@ -65,11 +65,12 @@ The emulator log identifies which driver failed.
 ## Adapter messages
 
 Call `onlineFind(loader)` and check `role()` before exchanging snapshots. `send`
-queues up to 64 bytes tagged with a channel ID; a newer unsent message replaces
-the older one. `receive` consumes the newest message for that channel and returns
+queues up to 224 bytes tagged with a channel ID. Newer input replaces an
+unsent message on the same channel; another channel waits until it is sent. `receive` consumes the newest message for that channel and returns
 its length. Wrong-peer, wrong-session and reordered messages are discarded.
-This prototype has one active adapter/channel and does not provide reliable
-delivery for events. Wire protocol revision 2 requires matching builds on both
+An adapter may multiplex channels. The transport does not provide reliable
+event delivery; Co-op adds acknowledgements for object batches. Wire protocol
+revision 3 requires matching builds on both
 systems. PINE mailbox offsets are unchanged.
 
 ## Implementation limits

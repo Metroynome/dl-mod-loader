@@ -6,7 +6,7 @@
 #define ONLINE_MAGIC (0x314e4c44)
 #define ONLINE_SERVICE_ID (0x4f4e4c4e)
 #define ONLINE_API_VERSION (2)
-#define ONLINE_MESSAGE_BYTES (64)
+#define ONLINE_MESSAGE_BYTES (224)
 
 typedef enum onlineCommand {
 	ONLINE_HOST = 1,
@@ -45,7 +45,8 @@ typedef struct onlineControl {
 } onlineControl_t;
 
 /* EE pointer layout. Latest-message datagrams, not a reliable event stream.
- * One active adapter/channel is intended for this prototype. */
+ * One adapter may multiplex channels. A queued packet on another channel is
+ * retained until sent; same-channel input snapshots still coalesce. */
 typedef struct onlineApi {
 	/* 0x00 */ u32 version;
 	/* 0x04 */ u32 size;
