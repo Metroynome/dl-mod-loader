@@ -69,16 +69,10 @@ int coopSessionScreen(void)
  */
 int coopSessionRead(coopSessionMenu_t* frame)
 {
-	u32 data, list, planet, menus;
-	int screen;
-	if ((Level != 21 && Level != 22) ||
-	    WORD(GetAddressImmediate(&vaSessionGetState)) != 0x24030054 ||
-	    WORD(GetAddressImmediate(&vaSessionGetScreen)) != 0x2402003c)
+	u32 data, list, planet;
+	int screen = coopSessionScreen();
+	if (screen < 0)
 		return 0;
-	menus = GetAddressImmediate(&vaSessionMenuData);
-	if (!menus || !*(u8*)menus || NATIVE(vaSessionGetState, int (*)(int))(0) != 2)
-		return 0;
-	screen = NATIVE(vaSessionGetScreen, int (*)(int))(0);
 	data = menuData(screen);
 	planet = planetAddress();
 	if (!data || !planet || WORD(data) != 0)

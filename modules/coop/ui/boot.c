@@ -12,7 +12,7 @@
 
 #define BOOT_DISCONNECT_FRAMES (12)
 #define WORD(address) (*(volatile u32*)(address))
-#define NATIVE(address, type) ((type)GetAddressImmediate(&(address)))
+#define NATIVE(address, type) ((type)(address))
 
 typedef struct bootButton {
 	/* 0x00 */ u32 enabled;
@@ -98,7 +98,7 @@ static u32 startAddress, frameCall, savedStart[2], savedFrame;
 static u32 trampoline[4] __attribute__((aligned(16)));
 static u32 saveAddress[2], saveWords[2][2];
 static u32 saveTrampoline[2][4] __attribute__((aligned(16)));
-static u32 frameSubmitAddress, canvasGetAddress, canvasSetAddress, switchLevelAddress, newLevelFlag;
+static u32 switchLevelAddress;
 static int waitingForHostLoad;
 static int bootLevel;
 static struct PAD* capturedPad;
@@ -152,7 +152,7 @@ static int bootPresent(void)
 	u32 address;
 	if (Level > 1 || (Level == 1 && Mission->ActiveMission != -1))
 		return 0;
-	address = GetAddressImmediate(&vaBootStart);
+	address = BOOT_START;
 	return address && (WORD(address) == 0x27bdffd0 ||
 	    (installed && WORD(address) == (0x08000000 | ((u32)startMenu >> 2))));
 }
@@ -203,13 +203,13 @@ static void releasePad(void)
  */
 static void nativeMenu(bootButton_t* buttons, int count, void (*back)(void*))
 {
-	NATIVE(vaBootClose, void (*)(int))(0);
-	NATIVE(vaBootCursor, void (*)(int, int))(0, 0);
-	NATIVE(vaBootTarget, void (*)(int, float, float, float, float))(0, .685f, .28f,
+	NATIVE(BOOT_CLOSE, void (*)(int))(0);
+	NATIVE(BOOT_CURSOR, void (*)(int, int))(0, 0);
+	NATIVE(BOOT_TARGET, void (*)(int, float, float, float, float))(0, .685f, .28f,
 	    (buttons == joinButtons || buttons == savedButtons) ? .52f : .37109375f, .048076924f);
-	NATIVE(vaBootHeader, void (*)(int, int))(0, 0);
-	NATIVE(vaBootButtons, void (*)(int, int, bootButton_t*))(0, count, buttons);
-	NATIVE(vaBootShow, void (*)(int, void (*)(void*)))(0, back);
+	NATIVE(BOOT_HEADER, void (*)(int, int))(0, 0);
+	NATIVE(BOOT_BUTTONS, void (*)(int, int, bootButton_t*))(0, count, buttons);
+	NATIVE(BOOT_SHOW, void (*)(int, void (*)(void*)))(0, back);
 }
 
 /*
@@ -239,7 +239,7 @@ static void showChoicesNow(void* unused)
 	(void)unused;
 	page = BOOT_CHOICES;
 	intent = pending = 0;
-	nativeMenu(choices, 3, NATIVE(vaBootExit, void (*)(void*)));
+	nativeMenu(choices, 3, NATIVE(BOOT_EXIT, void (*)(void*)));
 }
 
 /*
@@ -254,13 +254,13 @@ static void loadMenu(void)
 {
 	int cursor;
 	page = BOOT_SAVE;
-	NATIVE(vaBootClose, void (*)(int))(0);
+	NATIVE(BOOT_CLOSE, void (*)(int))(0);
 	((void (*)(int))trampoline)(0);
 	/* Preserve the original buttons, replacing only Back. */
-	cursor = NATIVE(vaBootCursorGet, int (*)(int))(0);
-	NATIVE(vaBootClose, void (*)(int))(0);
-	NATIVE(vaBootCursor, void (*)(int, int))(0, cursor < 0 ? 0 : cursor);
-	NATIVE(vaBootShow, void (*)(int, void (*)(void*)))(0,
+	cursor = NATIVE(BOOT_CURSOR_GET, int (*)(int))(0);
+	NATIVE(BOOT_CLOSE, void (*)(int))(0);
+	NATIVE(BOOT_CURSOR, void (*)(int, int))(0, cursor < 0 ? 0 : cursor);
+	NATIVE(BOOT_SHOW, void (*)(int, void (*)(void*)))(0,
 	    backFromSave);
 }
 
@@ -284,7 +284,7 @@ static void returnAfterDisconnect(void (*destination)(void*))
 	disconnectFrames = 0;
 	intent = pending = joinCheck = waitingForHostLoad = stopJoin = pendingBootAction = 0;
 	coopConnectionDisconnect();
-	NATIVE(vaBootDialog, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
+	NATIVE(BOOT_DIALOG, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
 	    (0, "Disconnecting...", 0, 1, 0, 0, .30f, 1);
 }
 
@@ -317,7 +317,7 @@ static void updateDisconnect(void)
 		return;
 	destination = afterDisconnect;
 	afterDisconnect = 0;
-	NATIVE(vaBootAbortDialog, void (*)(int))(0);
+	NATIVE(BOOT_ABORT_DIALOG, void (*)(int))(0);
 	destination(0);
 }
 
@@ -384,7 +384,6 @@ static void chooseHost(void* unused)
 		coopUiPlaySound(COOP_UI_OPEN);
 	showHostProfiles(unused);
 }
-
 
 /*
  * NAME : fieldLabel
@@ -454,7 +453,6 @@ static void leaveProfiles(void* unused)
 	}
 }
 
-
 /*
  * NAME : editName
  * DESCRIPTION : Reserve the selectable Name field for a future boot keyboard.
@@ -484,7 +482,6 @@ static void showJoin(void* unused)
 	intent = pending = 0;
 	showProfiles();
 }
-
 
 /*
  * NAME : profileSlot
@@ -536,7 +533,7 @@ static void showProfiles(void)
 	}
 	lastProfileButtons = profileHeld();
 	nativeMenu(savedButtons, profileAction == PROFILE_CONNECT ? 6 : 4, leaveProfiles);
-	NATIVE(vaBootCursor, void (*)(int, int))(0, selectedEndpoint);
+	NATIVE(BOOT_CURSOR, void (*)(int, int))(0, selectedEndpoint);
 }
 
 /*
@@ -604,7 +601,7 @@ static void removeProfile(void)
 		deleteMessage[length] = 0;
 	}
 	coopUiPlaySound(COOP_UI_OPEN);
-	NATIVE(vaBootDialog, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
+	NATIVE(BOOT_DIALOG, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
 	    (0, deleteMessage, confirmProfileDelete, 3, 0, 0, -1.0f, 0);
 }
 
@@ -641,7 +638,6 @@ static void editEndpoint(void* unused)
 	showProfiles();
 }
 
-
 /*
  * NAME : discardEndpoint
  * DESCRIPTION : Leave the editor only when discarding changes is confirmed.
@@ -676,7 +672,7 @@ static void cancelEndpoint(void* unused)
 		return;
 	}
 	coopUiPlaySound(COOP_UI_OPEN);
-	NATIVE(vaBootDialog, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
+	NATIVE(BOOT_DIALOG, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
 	    (0, "You have unsaved changes.\x01" "Quit without saving?", discardEndpoint, 3, 0, 0, -1.0f, 0);
 }
 
@@ -697,7 +693,6 @@ static void saveEndpoint(void* unused)
 	showProfiles();
 }
 
-
 /*
  * NAME : deleteEndpoint
  * DESCRIPTION : Choose a profile to delete from a profiles-only list.
@@ -714,7 +709,6 @@ static void deleteEndpoint(void* unused)
 	showProfiles();
 }
 
-
 /*
  * NAME : selectEndpoint
  * DESCRIPTION : Connect, edit or delete the selected profile.
@@ -725,7 +719,7 @@ static void deleteEndpoint(void* unused)
  */
 static void selectEndpoint(void* unused)
 {
-	int cursor = NATIVE(vaBootCursorGet, int (*)(int))(0);
+	int cursor = NATIVE(BOOT_CURSOR_GET, int (*)(int))(0);
 	(void)unused;
 	if ((u32)cursor >= 4)
 		return;
@@ -743,7 +737,6 @@ static void selectEndpoint(void* unused)
 	}
 }
 
-
 /*
  * NAME : profileMenuInput
  * DESCRIPTION : Handle Square/Circle shortcuts before native menu commands.
@@ -758,8 +751,8 @@ static void profileMenuInput(int player)
 	int cursor;
 	lastProfileButtons = held;
 	if (player == 0 && (page == BOOT_HOST || page == BOOT_JOIN) && !editing && !releasing &&
-	    !joinCheck && !afterDisconnect && !NATIVE(vaBootDialogShown, int (*)(int))(0)) {
-		cursor = NATIVE(vaBootCursorGet, int (*)(int))(0);
+	    !joinCheck && !afterDisconnect && !NATIVE(BOOT_DIALOG_SHOWN, int (*)(int))(0)) {
+		cursor = NATIVE(BOOT_CURSOR_GET, int (*)(int))(0);
 		if ((u32)cursor < 4)
 			selectedEndpoint = cursor;
 		if (held & (PAD_SQUARE | PAD_CIRCLE)) {
@@ -788,7 +781,7 @@ static void drawProfileHelp(void)
 	const char* text;
 	float width, scale;
 	if ((page != BOOT_HOST && page != BOOT_JOIN) || editing || releasing || joinCheck || afterDisconnect ||
-	    NATIVE(vaBootDialogShown, int (*)(int))(0))
+	    NATIVE(BOOT_DIALOG_SHOWN, int (*)(int))(0))
 		return;
 	text = profileAction == PROFILE_EDIT ? "\x10 EDIT   \x12 BACK" :
 	    profileAction == PROFILE_DELETE ? "\x10 DELETE   \x12 BACK" :
@@ -802,7 +795,7 @@ static void drawProfileHelp(void)
 
 /*
  * NAME : editField
- * DESCRIPTION : Open the standalone keypad over the native Join menu.
+ * DESCRIPTION : Open the standalone keypad over the native profile editor.
  * NOTES : Blocks native controls until the closing buttons are released.
  * ARGS : IP address or host port field.
  * RETURN :
@@ -885,7 +878,7 @@ static void cancelHostLoad(void* unused)
 	stopJoin = 1;
 	page = BOOT_CHOICES;
 	loader->print("coop: host level load cancelled\n");
-	NATIVE(vaBootExit, void (*)(void*))(0);
+	NATIVE(BOOT_EXIT, void (*)(void*))(0);
 }
 
 /*
@@ -898,17 +891,17 @@ static void cancelHostLoad(void* unused)
  */
 static void holdHostLoad(void)
 {
-	if (intent != ONLINE_JOIN || pending != 1 || !WORD(newLevelFlag))
+	if (intent != ONLINE_JOIN || pending != 1 || !WORD(BOOT_NEW_LEVEL_FLAG))
 		return;
-	WORD(newLevelFlag) = 0;
+	WORD(BOOT_NEW_LEVEL_FLAG) = 0;
 	/* Reading a save can already have replaced Level before its completion callback. */
 	Level = bootLevel;
 	waitingForHostLoad = 1;
 	loader->print("coop: guest save selected; waiting for host mission\n");
-	NATIVE(vaBootDialog, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
+	NATIVE(BOOT_DIALOG, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
 	    (0, "Loading host session...\x01" "Waiting for the host session to finish loading.",
 	    cancelHostLoad, 2, 0, 0, .30f, 1);
-	NATIVE(vaBootText, void (*)(u32, const char*))(0x130006, "CANCEL");
+	NATIVE(BOOT_TEXT, void (*)(u32, const char*))(0x130006, "CANCEL");
 }
 
 /*
@@ -980,11 +973,11 @@ static void updateHostLoad(void)
  */
 static void showDisclaimer(void)
 {
-	NATIVE(vaBootDialog, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
+	NATIVE(BOOT_DIALOG, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
 	    (0, "Choose a New Game or Load Game next. The selected save will be overwritten by the host's session. Continue?",
 	    acceptJoin, 7, 0, 0, -1.0f, 1);
-	NATIVE(vaBootText, void (*)(u32, const char*))(0x130006, "Cancel");
-	NATIVE(vaBootText, void (*)(u32, const char*))(0x130008, "Continue");
+	NATIVE(BOOT_TEXT, void (*)(u32, const char*))(0x130006, "Cancel");
+	NATIVE(BOOT_TEXT, void (*)(u32, const char*))(0x130008, "Continue");
 }
 
 /*
@@ -1069,9 +1062,9 @@ static void failJoinCheck(int error)
 	joinCheck = JOIN_CHECK_NONE;
 	stopJoin = 1;
 	setJoinStep(joinStep, error);
-	NATIVE(vaBootDialog, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
+	NATIVE(BOOT_DIALOG, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
 	    (0, joinMessage, cancelJoinCheck, 2, 0, 0, .30f, 1);
-	NATIVE(vaBootText, void (*)(u32, const char*))(0x130006, "OKAY");
+	NATIVE(BOOT_TEXT, void (*)(u32, const char*))(0x130006, "OKAY");
 }
 
 /*
@@ -1106,9 +1099,9 @@ static void beginConnection(int command)
 	joinCheck = JOIN_CHECK_REQUEST;
 	joinRendered = joinStep = joinError = 0;
 	setJoinStep(1, 0);
-	NATIVE(vaBootDialog, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
+	NATIVE(BOOT_DIALOG, void (*)(int, const char*, void (*)(void*), int, int, int, float, int))
 	    (0, joinMessage, cancelJoinCheck, 2, 0, 0, .30f, 0);
-	NATIVE(vaBootText, void (*)(u32, const char*))(0x130006, "CANCEL");
+	NATIVE(BOOT_TEXT, void (*)(u32, const char*))(0x130006, "CANCEL");
 }
 
 /*
@@ -1165,7 +1158,7 @@ static void updateJoinCheck(void)
 				intent = ONLINE_HOST;
 				pending = 1;
 				loader->print("coop: host session ready; choosing save\n");
-				NATIVE(vaBootAbortDialog, void (*)(int))(0);
+				NATIVE(BOOT_ABORT_DIALOG, void (*)(int))(0);
 				loadMenu();
 				return;
 			}
@@ -1180,7 +1173,7 @@ static void updateJoinCheck(void)
 		else if (state->status == ONLINE_CONNECTING)
 			setJoinStep(4, 0);
 	}
-	NATIVE(vaBootText, void (*)(u32, const char*))(0x130004, joinMessage);
+	NATIVE(BOOT_TEXT, void (*)(u32, const char*))(0x130004, joinMessage);
 }
 
 /*
@@ -1193,7 +1186,7 @@ static void updateJoinCheck(void)
  */
 static void startMenu(int player)
 {
-	if (NATIVE(vaBootGetMode, int (*)(void))() != 1) {
+	if (NATIVE(BOOT_GET_MODE, int (*)(void))() != 1) {
 		coopConnectionDisconnect();
 		intent = pending = 0;
 		page = BOOT_CHOICES;
@@ -1218,11 +1211,11 @@ static void startMenu(int player)
  */
 static void submitFrame(void)
 {
-	int canvas = ((int (*)(void))canvasGetAddress)();
+	int canvas = ((int (*)(void))BOOT_CANVAS_GET)();
 	u32 held = (~(sample[2] | (sample[3] << 8))) & 0xffff;
-	((void (*)(int))canvasSetAddress)(0);
+	((void (*)(int))BOOT_CANVAS_SET)(0);
 	if ((page == BOOT_JOIN || page == BOOT_HOST) && joinCheck == JOIN_CHECK_NONE) {
-		int cursor = NATIVE(vaBootCursorGet, int (*)(int))(0);
+		int cursor = NATIVE(BOOT_CURSOR_GET, int (*)(int))(0);
 		if ((u32)cursor < 4)
 			selectedEndpoint = cursor;
 	}
@@ -1247,8 +1240,8 @@ static void submitFrame(void)
 		releasePad();
 	}
 	drawProfileHelp();
-	((void (*)(int))canvasSetAddress)(canvas);
-	((void (*)(void))frameSubmitAddress)();
+	((void (*)(int))BOOT_CANVAS_SET)(canvas);
+	((void (*)(void))BOOT_FRAME_SUBMIT)();
 	joinRendered = 1;
 	if (afterDisconnect && disconnectFrames < BOOT_DISCONNECT_FRAMES)
 		++disconnectFrames;
@@ -1363,26 +1356,22 @@ void coopBootUpdate(void)
 			return;
 		}
 		online = onlineFind(loader);
-		if (NATIVE(vaBootGetMode, int (*)(void))() != 1 && online &&
+		if (NATIVE(BOOT_GET_MODE, int (*)(void))() != 1 && online &&
 		    online->control->status != ONLINE_IDLE && online->control->status != ONLINE_FAILED &&
 		    online->control->command != ONLINE_STOP)
 			coopConnectionDisconnect();
 		return;
 	}
-	startAddress = GetAddressImmediate(&vaBootStart);
-	profileInputAddress = GetAddressImmediate(&vaBootMenuInput);
-	multiplayerAddress = GetAddressImmediate(&vaBootMultiplayer);
-	singleplayerAddress = GetAddressImmediate(&vaBootSingleplayer);
+	startAddress = BOOT_START;
+	profileInputAddress = BOOT_MENU_INPUT;
+	multiplayerAddress = BOOT_MULTIPLAYER;
+	singleplayerAddress = BOOT_SINGLEPLAYER;
 	bootLevel = Level;
-	frameCall = GetAddressImmediate(&vaBootFrameCall);
-	frameSubmitAddress = GetAddressImmediate(&vaBootFrameSubmit);
-	canvasGetAddress = GetAddressImmediate(&vaBootCanvasGet);
-	canvasSetAddress = GetAddressImmediate(&vaBootCanvasSet);
+	frameCall = BOOT_FRAME_CALL;
 	switchLevelAddress = GetAddressImmediate(&vaSwitchToLevelFunc);
-	newLevelFlag = GetAddressImmediate(&vaBootNewLevelFlag);
-	saveAddress[0] = GetAddressImmediate(&vaBootNewGame);
-	saveAddress[1] = GetAddressImmediate(&vaBootLoadDone);
-	savedFrame = 0x0c000000 | (frameSubmitAddress >> 2);
+	saveAddress[0] = BOOT_NEW_GAME;
+	saveAddress[1] = BOOT_LOAD_DONE;
+	savedFrame = 0x0c000000 | (BOOT_FRAME_SUBMIT >> 2);
 	/* Displaced instructions contain no PC-relative control flow. */
 	if (WORD(startAddress) != 0x27bdffd0 ||
 	    (WORD(startAddress + 4) & 0xffff0000) != 0x3c020000 || WORD(frameCall) != savedFrame || !profileInputAddress ||
