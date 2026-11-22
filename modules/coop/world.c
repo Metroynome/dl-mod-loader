@@ -1,13 +1,15 @@
 #include <librac4/map.h>
 #include "world.h"
 #include "objects.h"
+#include "ui/session.h"
 #include <librac4/interop.h>
 #include <librac4/game.h>
 #include <librac4/player.h>
 
 #define WORLD_CHANNEL (0x444c4357)
-#define WORLD_MAGIC (0x32574344)
+#define WORLD_MAGIC (0x33574344)
 #define WORLD_INTERVAL (30000000)
+#define WORLD_MENU_INTERVAL (5000000)
 #define WORLD_READY (1)
 #define WORD(address) (*(volatile u32*)(address))
 
@@ -23,12 +25,17 @@ typedef struct coopWorld {
 	/* 0x24 */ float maxHealth[2];
 	/* 0x2c */ int missionLink;
 	/* 0x30 */ int playerState[2];
+	/* 0x38 */ coopSessionMenu_t menu;
 } coopWorld_t;
 
 static u32 lastSent;
 static int pendingDeath[2], deathLevel, deathMission;
 
 static int requestedLevel, requestedMission = -1;
+static coopHostSession_t hostSession;
+static u32 hostSessionTime;
+static int hostSessionValid;
+static u32 lastHostFrame;
 
 static VariableAddress_t vaMissionIndex = {
 #if RAC4_PAL
@@ -132,6 +139,22 @@ static u32 worldTicks(void)
 }
 
 /*
+ * NAME : coopWorldGetHostSession
+ * DESCRIPTION : Read a fresh, playable host mission before the guest loads.
+ * NOTES : Mission selection remains joinable; transitions expire after two seconds.
+ * ARGS : Session destination.
+ * RETURN : Nonzero when the host has advertised a supported ready mission.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+int coopWorldGetHostSession(coopHostSession_t* session)
+{
+	if (!session || !hostSessionValid || worldTicks() - hostSessionTime >= 294912000)
+		return 0;
+	*session = hostSession;
+	return 1;
+}
+
+/*
  * NAME : coopWorldReady
  * DESCRIPTION : Verify a stable supported co-op mission before touching actors.
  * NOTES : Transition flags are derived from the native SwitchToLevel store.
@@ -146,11 +169,11 @@ int coopWorldReady(void)
 	u32 mission = GetAddressImmediate(&vaMissionIndex);
 	u32 modeAddress = GetAddressImmediate(&vaCoopGameMode);
 	int mode = modeAddress ? (int)WORD(modeAddress) : GAME_MODE_NONE;
-	if ((Level != 21 && Level != 22) || playerGetNumLocals() != 2 ||
-	    (mode != GAME_MODE_NORMAL && mode != GAME_MODE_PAUSE) || !address ||
-	    WORD(address) != 0x27bdffd0 || WORD(address + 0x34) != (0x8c630000 | ((u32)&Level & 0xffff)))
+	if ((Level != 21 && Level != 22) || playerGetNumLocals() != 2 || !address ||
+	    WORD(address) != 0x27bdffd0 || WORD(address + 0x34) != (0x8c630000 | ((u32)&Level & 0xffff)) ||
+	    !pending || !mission || WORD(pending) || Mission->Loading)
 		return 0;
-	return pending && mission && !WORD(pending) && !Mission->Loading &&
+	return (mode == GAME_MODE_NORMAL || mode == GAME_MODE_PAUSE || coopSessionRead(0)) &&
 	    (int)WORD(mission) >= 0 && WORD(mission) < 64;
 }
 
@@ -243,6 +266,8 @@ int coopWorldUpdate(const moduleApi_t* loader, const onlineApi_t* online, int en
 	int* save;
 	int role, ready, i, size;
 	if (!enabled || loader->context != DL_CONTEXT_CAMPAIGN || !online || !(role = online->role())) {
+		coopSessionReset();
+		hostSessionValid = 0;
 		requestedLevel = 0;
 		requestedMission = -1;
 		pendingDeath[0] = pendingDeath[1] = 0;
@@ -250,10 +275,22 @@ int coopWorldUpdate(const moduleApi_t* loader, const onlineApi_t* online, int en
 	}
 	ready = coopWorldReady();
 	size = online->receive(WORLD_CHANNEL, &frame, sizeof(frame));
+	if (role == ONLINE_JOIN && size == sizeof(frame) && frame.magic == WORLD_MAGIC) {
+		hostSessionValid = (frame.flags & WORLD_READY) && (frame.level == 21 || frame.level == 22) &&
+		    frame.mission >= 0 && frame.mission < 64 && frame.missionLink >= -1 && frame.missionLink < 256;
+		if (hostSessionValid) {
+			lastHostFrame = now;
+			hostSession.level = frame.level;
+			hostSession.mission = frame.mission;
+			hostSession.missionLink = frame.missionLink;
+			hostSessionTime = now;
+		}
+	}
 	if (role == ONLINE_JOIN && size == sizeof(frame) && frame.magic == WORLD_MAGIC &&
 	    (frame.flags & WORLD_READY) && (frame.level == 21 || frame.level == 22) &&
-	    frame.mission >= 0 && frame.mission < 64 && frame.missionLink >= 0 && frame.missionLink < 256 && ready) {
-		if (frame.level != Level || frame.mission != (int)WORD(GetAddressImmediate(&vaMissionIndex)) || frame.missionLink != Mission->ActiveMission) {
+	    frame.mission >= 0 && frame.mission < 64 && frame.missionLink >= -1 && frame.missionLink < 256 && ready) {
+		if (frame.level != Level || frame.mission != (int)WORD(GetAddressImmediate(&vaMissionIndex)) ||
+		    (frame.menu.screen == 0 && frame.missionLink != Mission->ActiveMission)) {
 			if (requestedLevel != frame.level || requestedMission != frame.mission) {
 				address = GetAddressImmediate(&vaSwitchToLevelFunc);
 				requestedLevel = frame.level;
@@ -264,10 +301,18 @@ int coopWorldUpdate(const moduleApi_t* loader, const onlineApi_t* online, int en
 		} else {
 			requestedLevel = 0;
 			requestedMission = -1;
+			coopSessionApply(&frame.menu);
 			applySharedStats(&frame);
 		}
 	}
-	if (role != ONLINE_HOST || now - lastSent < WORLD_INTERVAL)
+	if (role == ONLINE_JOIN && coopSessionWatching() && now - lastHostFrame >= 294912000)
+		coopSessionApply(0);
+	if (role != ONLINE_HOST)
+		return 0;
+	frame.menu.screen = frame.menu.focus = frame.menu.planet = 0;
+	if (ready)
+		coopSessionRead(&frame.menu);
+	if (now - lastSent < (frame.menu.screen ? WORLD_MENU_INTERVAL : WORLD_INTERVAL))
 		return 0;
 	frame.magic = WORLD_MAGIC;
 	frame.level = Level;

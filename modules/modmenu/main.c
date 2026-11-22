@@ -98,7 +98,8 @@ static const modMenuApi_t menuApi = {
 	setItemButtons,
 	returnToGame,
 	getButtons,
-	menuBackendRightStick
+	menuBackendRightStick,
+	menuBackendLeftStick
 };
 /* A window of whole tabs: measured text plus Horizon-style padding. Scroll
  * the first visible tab only when the focused tab would fall outside it. */

@@ -11,13 +11,69 @@ static const modMenuApi_t* menu;
 static int ip[4], hostPort = 25565, localPort = 25566;
 static int field = -1, tab, ownsModal, configStatus, status, pending, requestError;
 static u32 pendingId;
+static int disconnectPending;
+static int profiles[8][5] = {
+	{0, 0, 0, 0, 25565}, {0, 0, 0, 0, 25565}, {0, 0, 0, 0, 25565}, {0, 0, 0, 0, 25565},
+	{0, 0, 0, 0, 25565}, {0, 0, 0, 0, 25565}, {0, 0, 0, 0, 25565}, {0, 0, 0, 0, 25565}
+};
+static int profileVersion;
+static int editBackup[5], profileEditing;
 static const moduleConfigField_t settings[] = {
 	{"ip0", &ip[0], 0, 255},
 	{"ip1", &ip[1], 0, 255},
 	{"ip2", &ip[2], 0, 255},
 	{"ip3", &ip[3], 0, 255},
 	{"hostPort", &hostPort, 1, 65535},
-	{"localPort", &localPort, 1, 65535}
+	{"localPort", &localPort, 1, 65535},
+	{"profileVersion", &profileVersion, 0, 1},
+	{"join0ip0", &profiles[0][0], 0, 255},
+	{"join0ip1", &profiles[0][1], 0, 255},
+	{"join0ip2", &profiles[0][2], 0, 255},
+	{"join0ip3", &profiles[0][3], 0, 255},
+	{"join0port", &profiles[0][4], 1, 65535},
+	{"join1ip0", &profiles[1][0], 0, 255},
+	{"join1ip1", &profiles[1][1], 0, 255},
+	{"join1ip2", &profiles[1][2], 0, 255},
+	{"join1ip3", &profiles[1][3], 0, 255},
+	{"join1port", &profiles[1][4], 1, 65535},
+	{"join2ip0", &profiles[2][0], 0, 255},
+	{"join2ip1", &profiles[2][1], 0, 255},
+	{"join2ip2", &profiles[2][2], 0, 255},
+	{"join2ip3", &profiles[2][3], 0, 255},
+	{"join2port", &profiles[2][4], 1, 65535},
+	{"join3ip0", &profiles[3][0], 0, 255},
+	{"join3ip1", &profiles[3][1], 0, 255},
+	{"join3ip2", &profiles[3][2], 0, 255},
+	{"join3ip3", &profiles[3][3], 0, 255},
+	{"join3port", &profiles[3][4], 1, 65535},
+	{"hostIp0", &profiles[4][0], 0, 255},
+	{"hostIp1", &profiles[4][1], 0, 255},
+	{"hostIp2", &profiles[4][2], 0, 255},
+	{"hostIp3", &profiles[4][3], 0, 255},
+	{"listenPort", &profiles[4][4], 1, 65535}
+};
+
+static const moduleConfigField_t hostSettings[] = {
+	{"profile0ip0", &profiles[4][0], 0, 255},
+	{"profile0ip1", &profiles[4][1], 0, 255},
+	{"profile0ip2", &profiles[4][2], 0, 255},
+	{"profile0ip3", &profiles[4][3], 0, 255},
+	{"profile0port", &profiles[4][4], 1, 65535},
+	{"profile1ip0", &profiles[5][0], 0, 255},
+	{"profile1ip1", &profiles[5][1], 0, 255},
+	{"profile1ip2", &profiles[5][2], 0, 255},
+	{"profile1ip3", &profiles[5][3], 0, 255},
+	{"profile1port", &profiles[5][4], 1, 65535},
+	{"profile2ip0", &profiles[6][0], 0, 255},
+	{"profile2ip1", &profiles[6][1], 0, 255},
+	{"profile2ip2", &profiles[6][2], 0, 255},
+	{"profile2ip3", &profiles[6][3], 0, 255},
+	{"profile2port", &profiles[6][4], 1, 65535},
+	{"profile3ip0", &profiles[7][0], 0, 255},
+	{"profile3ip1", &profiles[7][1], 0, 255},
+	{"profile3ip2", &profiles[7][2], 0, 255},
+	{"profile3ip3", &profiles[7][3], 0, 255},
+	{"profile3port", &profiles[7][4], 1, 65535}
 };
 
 /*
@@ -52,6 +108,139 @@ static const char* valueLabel(void* context, int unused)
 		return "[none]";
 	coopNumpadFormat(which == COOP_CONNECTION_ADDRESS ? COOP_NUMPAD_ADDRESS : COOP_NUMPAD_PORT, value, text);
 	return text;
+}
+
+/*
+ * NAME : coopConnectionValue
+ * DESCRIPTION : Format a connection field for the native boot menu.
+ * NOTES : Copy the returned text before requesting another field.
+ * ARGS : Address, host port or local port.
+ * RETURN : Shared text buffer or the unset-address label.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+const char* coopConnectionValue(coopConnectionField_e which)
+{
+	return (u32)which <= COOP_CONNECTION_LOCAL_PORT ? valueLabel((void*)which, 0) : "";
+}
+
+/*
+ * NAME : coopConnectionProfileLabel
+ * DESCRIPTION : Show a connection name without changing the active endpoint.
+ * NOTES : Names use the placeholder until a boot-compatible keyboard is available.
+ * ARGS : Slot index.
+ * RETURN : Profile name or the empty-slot label.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+const char* coopConnectionProfileLabel(int slot)
+{
+	if ((u32)slot >= 8)
+		return "";
+	if (!(profiles[slot][0] || profiles[slot][1] || profiles[slot][2] || profiles[slot][3]))
+		return "[EMPTY]";
+	return COOP_CONNECTION_DEFAULT_NAME;
+}
+
+/*
+ * NAME : coopConnectionProfileSelect
+ * DESCRIPTION : Apply a saved endpoint for joining.
+ * NOTES :
+ * ARGS : Slot index.
+ * RETURN : Nonzero for a populated slot.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+int coopConnectionProfileSelect(int slot)
+{
+	int i;
+	if ((u32)slot >= 8)
+		return 0;
+	for (i = 0; i < 4; ++i)
+		ip[i] = profiles[slot][i];
+	hostPort = profiles[slot][4];
+	return addressValue() != 0;
+}
+
+/*
+ * NAME : coopConnectionProfileBegin
+ * DESCRIPTION : Stage an endpoint in the existing keypad fields.
+ * NOTES :
+ * ARGS : Slot index.
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+void coopConnectionProfileBegin(int slot)
+{
+	int i;
+	if (profileEditing || (u32)slot >= 8)
+		return;
+	for (i = 0; i < 4; ++i)
+		editBackup[i] = ip[i];
+	editBackup[4] = hostPort;
+	profileEditing = 1;
+	coopConnectionProfileSelect(slot);
+}
+
+/*
+ * NAME : coopConnectionProfileChanged
+ * DESCRIPTION : Compare the open profile draft against its saved values.
+ * NOTES : Returning fields to their original values clears the unsaved state.
+ * ARGS : Profile slot.
+ * RETURN : Nonzero when address or port edits would be lost.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+int coopConnectionProfileChanged(int slot)
+{
+	int i;
+	if (!profileEditing || (u32)slot >= 8)
+		return 0;
+	for (i = 0; i < 4; ++i)
+		if (ip[i] != profiles[slot][i])
+			return 1;
+	return hostPort != profiles[slot][4];
+}
+
+/*
+ * NAME : coopConnectionProfileEnd
+ * DESCRIPTION : Save an edited slot or discard its draft.
+ * NOTES :
+ * ARGS : Slot and nonzero to save.
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+void coopConnectionProfileEnd(int slot, int save)
+{
+	int i;
+	if (!profileEditing || (u32)slot >= 8)
+		return;
+	if (save) {
+		for (i = 0; i < 4; ++i)
+			profiles[slot][i] = ip[i];
+		profiles[slot][4] = hostPort;
+	}
+	for (i = 0; i < 4; ++i)
+		ip[i] = editBackup[i];
+	hostPort = editBackup[4];
+	profileEditing = 0;
+	if (save)
+		coopConnectionSave();
+}
+
+/*
+ * NAME : coopConnectionProfileDelete
+ * DESCRIPTION : Clear only the selected saved endpoint.
+ * NOTES :
+ * ARGS : Slot index.
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+void coopConnectionProfileDelete(int slot)
+{
+	int i;
+	if ((u32)slot >= 8)
+		return;
+	for (i = 0; i < 4; ++i)
+		profiles[slot][i] = 0;
+	profiles[slot][4] = 25565;
+	coopConnectionSave();
 }
 
 /*
@@ -153,6 +342,8 @@ static int editorModal(u32 pressed)
 {
 	u32 stick = menu->getRightStick();
 	coopNumpadMove(stick & 255, (stick >> 8) & 255);
+	stick = menu->getLeftStick();
+	coopNumpadNavigate(stick & 255, (stick >> 8) & 255);
 	if (coopConnectionInput(pressed, menu->getButtons())) {
 		ownsModal = 0;
 		return 0;
@@ -182,14 +373,33 @@ static void openField(void* context)
 /*
  * NAME : coopConnectionLoad
  * DESCRIPTION : Load saved connection defaults through the loader.
- * NOTES : A missing file preserves current values; loading is transactional.
+ * NOTES : Each file loads transactionally; missing files preserve current defaults.
  * ARGS :
  * RETURN : Loader configuration result.
  * AUTHOR : Troy "Metroynome" Pruitt
  */
 int coopConnectionLoad(void)
 {
+	int hostResult;
 	int result = loader->loadConfig("coop-online", settings, sizeof(settings) / sizeof(settings[0]));
+	if ((result == DL_CONFIG_OK || result == DL_CONFIG_MISSING) && !profileVersion) {
+		int i, j;
+		for (i = 0; i < 4; ++i)
+			profiles[i][4] = 25565;
+		for (j = 0; j < 4; ++j)
+			profiles[0][j] = ip[j];
+		profiles[0][4] = hostPort;
+		for (j = 0; j < 4; ++j)
+			profiles[4][j] = ip[j];
+		profiles[4][4] = hostPort;
+		profileVersion = 1;
+	}
+	if (result == DL_CONFIG_OK || result == DL_CONFIG_MISSING) {
+		/* An older file supplies host slot zero until the separate list is saved. */
+		hostResult = loader->loadConfig("coop-host", hostSettings, sizeof(hostSettings) / sizeof(hostSettings[0]));
+		if (hostResult < DL_CONFIG_MISSING || hostResult == DL_CONFIG_OK)
+			result = hostResult;
+	}
 	configStatus = result == DL_CONFIG_OK ? 1 : result == DL_CONFIG_MISSING ? 3 : result == DL_CONFIG_INVALID ? 4 : 5;
 	return result;
 }
@@ -205,6 +415,8 @@ int coopConnectionLoad(void)
 int coopConnectionSave(void)
 {
 	int result = loader->saveConfig("coop-online", settings, sizeof(settings) / sizeof(settings[0]));
+	if (result == DL_CONFIG_OK)
+		result = loader->saveConfig("coop-host", hostSettings, sizeof(hostSettings) / sizeof(hostSettings[0]));
 	configStatus = result == DL_CONFIG_OK ? 2 : 5;
 	return result;
 }
@@ -248,6 +460,48 @@ int coopConnectionRequest(u32 command)
 }
 
 /*
+ * NAME : coopConnectionDisconnect
+ * DESCRIPTION : Queue disconnect without overwriting an in-flight request.
+ * NOTES : Update submits Stop when the transport acknowledges its current command.
+ * ARGS :
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+void coopConnectionDisconnect(void)
+{
+	disconnectPending = transport != 0;
+}
+
+/*
+ * NAME : coopConnectionCanDisconnect
+ * DESCRIPTION : Enable Disconnect only for a live peer or listening host.
+ * NOTES : Idle, failed, starting and already stopping sessions stay disabled.
+ * ARGS :
+ * RETURN : Nonzero when Disconnect is available.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+int coopConnectionCanDisconnect(void)
+{
+	return !disconnectPending && transport && transport->control->command != ONLINE_STOP &&
+	    (transport->control->status == ONLINE_HOSTING || transport->control->status == ONLINE_CONNECTED);
+}
+
+/*
+ * NAME : coopConnectionStopped
+ * DESCRIPTION : Check that a queued disconnect has completed.
+ * NOTES : Stop acknowledgement alone is insufficient; the socket must be closed.
+ * ARGS :
+ * RETURN : Nonzero when no session or outstanding command remains.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+int coopConnectionStopped(void)
+{
+	return !disconnectPending && (!transport ||
+	    (transport->control->requestId == transport->control->acceptedId &&
+	    transport->control->status == ONLINE_IDLE));
+}
+
+/*
  * NAME : connectionAction
  * DESCRIPTION : Submit the highlighted transport action.
  * NOTES :
@@ -257,7 +511,8 @@ int coopConnectionRequest(u32 command)
  */
 static void connectionAction(void* context)
 {
-	coopConnectionRequest((u32)context);
+	if ((u32)context != ONLINE_STOP || coopConnectionCanDisconnect())
+		coopConnectionRequest((u32)context);
 }
 
 /*
@@ -341,12 +596,16 @@ void coopConnectionUpdate(const onlineApi_t* online)
 	transport = online;
 	status = transport ? transport->control->status : ONLINE_IDLE;
 	registerMenu();
+	if (disconnectPending && transport && transport->control->requestId == transport->control->acceptedId) {
+		if (status == ONLINE_IDLE || !coopConnectionRequest(ONLINE_STOP))
+			disconnectPending = 0;
+	}
 	if (pending && transport && transport->control->acceptedId == pendingId) {
 		if (transport->control->error || status == ONLINE_FAILED || pending == ONLINE_STOP)
 			pending = 0;
 		else if ((pending == ONLINE_HOST && status == ONLINE_HOSTING) || status == ONLINE_CONNECTED) {
 			pending = 0;
-			if (menu)
+			if (menu && menu->isOpen())
 				menu->returnToGame();
 		}
 	}
@@ -366,6 +625,7 @@ void coopConnectionDeactivate(void)
 		menu->setModal(0);
 	if (menu && tab)
 		menu->removeTab(tab);
+	coopConnectionProfileEnd(0, 0);
 	field = -1;
 	menu = 0;
 	transport = 0;

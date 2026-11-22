@@ -1,3 +1,3 @@
 LIBRARY = librac4
 REGIONS = ntscu
-EE_OBJS = main.o world.o objects.o encounters.o ui/connection.o ui/numpad.o ui/sound.o
+EE_OBJS = main.o world.o objects.o encounters.o ui/connection.o ui/numpad.o ui/sound.o ui/boot.o ui/session.o ui/pause.o

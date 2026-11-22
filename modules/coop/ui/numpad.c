@@ -7,8 +7,8 @@
 #define ACCENT_COLOR (0x8024a9de)
 #define INPUT_SCALE (1.0f)
 #define CURSOR_BLINK_TICKS (73728000)
-#define NAVIGATION_DELAY (44236800)
-#define NAVIGATION_INTERVAL (11796480)
+#define NAVIGATION_DELAY (110592000)
+#define NAVIGATION_INTERVAL (14745600)
 #define NAVIGATION_BUTTONS (PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT)
 #define KEY_SIZE (44.0f)
 #define KEY_GAP (5.0f)
@@ -33,6 +33,7 @@ static u32 cursorTime;
 static u32 moveTime;
 static float panelX, panelY;
 static u32 repeatDirection, repeatTime, repeatDelay;
+static u32 stickDirection;
 static int cursorVisible;
 static double acceptedNumber, minimumValue, maximumValue;
 static const char* keys[] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "-", "\x13 Delete", "\x1f Done"};
@@ -224,6 +225,7 @@ void coopNumpadOpen(coopNumpadKind_e kind, const char* text, double minimum, dou
 	parseInput(&acceptedValue, &acceptedNumber);
 	resetCursorBlink();
 	repeatDirection = 0;
+	stickDirection = 0;
 	panelX = (SCREEN_WIDTH - PANEL_WIDTH) * .5f;
 	panelY = (SCREEN_HEIGHT - PANEL_HEIGHT) * .5f;
 	moveTime = cursorTicks();
@@ -268,6 +270,28 @@ void coopNumpadMove(int horizontal, int vertical)
 }
 
 /*
+ * NAME : coopNumpadNavigate
+ * DESCRIPTION : Supply left-stick navigation for the next input update.
+ * NOTES : Uses D-pad repeat timing; the dominant axis wins diagonals.
+ * ARGS : Raw horizontal and vertical bytes, centered at 127.
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+void coopNumpadNavigate(int horizontal, int vertical)
+{
+	int x, y;
+	horizontal -= 127;
+	vertical -= 127;
+	x = horizontal < 0 ? -horizontal : horizontal;
+	y = vertical < 0 ? -vertical : vertical;
+	stickDirection = 0;
+	if (x > 48 && x > y)
+		stickDirection = horizontal < 0 ? PAD_LEFT : PAD_RIGHT;
+	else if (y > 48)
+		stickDirection = vertical < 0 ? PAD_UP : PAD_DOWN;
+}
+
+/*
  * NAME : deleteDigit
  * DESCRIPTION : Delete one character before the cursor.
  * NOTES : Square and the wide Delete key use the same action.
@@ -283,7 +307,7 @@ static void deleteDigit(void)
 		for (i = cursor; i < length; ++i)
 			input[i] = input[i + 1];
 		--length;
-		coopUiPlaySound(COOP_UI_SELECT);
+		coopUiPlaySound(COOP_UI_DELETE);
 	}
 	if (!cursor)
 		textStart = 0;
@@ -380,6 +404,8 @@ int coopNumpadInput(u32 pressed, u32 held)
 	}
 	if (pressed & (PAD_START | PAD_R2))
 		return submitInput();
+	if (!(held & NAVIGATION_BUTTONS))
+		held |= stickDirection;
 	pressed = repeatNavigation(pressed, held);
 	if (pressed & PAD_UP)
 		row = (row + 4) % 5;

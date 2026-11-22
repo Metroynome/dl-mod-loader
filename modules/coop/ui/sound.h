@@ -1,11 +1,14 @@
 #ifndef DL_COOP_UI_SOUND_H
 #define DL_COOP_UI_SOUND_H
 
+#include <librac4/sound.h>
+
 typedef enum coopUiSound {
-	COOP_UI_OPEN = 0x0b,
-	COOP_UI_CLOSE = 0x0c,
-	COOP_UI_MOVE = 0x10,
-	COOP_UI_SELECT = 0x05
+	COOP_UI_OPEN = SOUND_KEYBOARD_OPEN,
+	COOP_UI_CLOSE = SOUND_KEYBOARD_CLOSE,
+	COOP_UI_MOVE = SOUND_KEYBOARD_MOVE,
+	COOP_UI_SELECT = SOUND_KEYBOARD_INSERT,
+	COOP_UI_DELETE = SOUND_KEYBOARD_DELETE
 } coopUiSound_e;
 
 void coopUiPlaySound(coopUiSound_e sound);

@@ -4,6 +4,8 @@
 #include "module.h"
 #include "modules/online/include/online.h"
 
+#define COOP_CONNECTION_DEFAULT_NAME "localhost"
+
 typedef enum coopConnectionField {
 	COOP_CONNECTION_ADDRESS,
 	COOP_CONNECTION_HOST_PORT,
@@ -24,5 +26,16 @@ void coopConnectionDraw(void);
 int coopConnectionLoad(void);
 int coopConnectionSave(void);
 int coopConnectionRequest(u32 command);
+void coopConnectionDisconnect(void);
+int coopConnectionCanDisconnect(void);
+int coopConnectionStopped(void);
+const char* coopConnectionValue(coopConnectionField_e field);
+
+const char* coopConnectionProfileLabel(int slot);
+int coopConnectionProfileSelect(int slot);
+void coopConnectionProfileBegin(int slot);
+int coopConnectionProfileChanged(int slot);
+void coopConnectionProfileEnd(int slot, int save);
+void coopConnectionProfileDelete(int slot);
 
 #endif

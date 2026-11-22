@@ -6,6 +6,54 @@ optional. Build with `make NAME=coop REGION=ntscu` and follow
 [Online's setup](../online/README.md). Enable `coop campaign` in modules.txt.
 Both systems must use matching Co-op and Online builds.
 
+## Cooperative boot menu
+
+With Co-op loaded, Cooperative opens Split Screen, Host and Join. Campaign's
+normal New Game/Load Game menu is unchanged.
+
+- Split Screen opens the original Cooperative save menu and disables the online
+  adapter, keeping the native two-player screen layout.
+- Host and Join each have four saved connection profiles. Filled entries currently
+  display "localhost"; empty slots show [EMPTY]. Select a filled entry to connect,
+  or an empty slot to create a profile. The editor has NAME, IP ADDRESS, PORT and
+  CREATE for new profiles or SAVE for existing ones. NAME is a placeholder
+  until a boot-compatible keyboard is added.
+- EDIT and DELETE open a profiles-only list for choosing an entry. Square edits
+  the highlighted profile directly; Circle deletes it. Triangle cancels an edit
+  or returns from an action list. The footer shows the controller shortcuts.
+  CREATE/SAVE writes the profile. Triangle warns before discarding unsaved changes.
+  Host profiles use `coop-host.<region>.ini`; existing Host settings become the
+  first Host profile. Join profiles remain in `coop-online.<region>.ini`.
+- Hosting shows connection progress and opens the listening port before opening
+  New Game/Load Game. Backing out cancels hosting.
+- Joining first connects to the selected host.
+  Joining shows connection steps: preparing, loading drivers, obtaining a local IP
+  address and contacting the host. Cancel stops the attempt. Failures keep the
+  last step and error code visible until acknowledged. Each step is also logged;
+  driver startup logs each filename before loading it.
+  Only a successful handshake opens the save-overwrite disclaimer. Cancel
+  disconnects; Continue opens the original New Game and Load Game choices.
+  The checked connection stays active while choosing/loading the save. If it
+  times out during loading, the guest retries once its level is ready.
+  Disconnect in the Online tab cancels a pending retry.
+
+The native menus, keypad input capture and rendering do not require Mod Menu.
+Existing native controller requirements still apply. The network prototype still
+supports NTSC-U Station/Catacrom only; these UI changes do not expand world sync
+or copy the host's entire save. Native autosave may write the guest's session.
+The guest chooses New Game or Load Game as usual, but its first level transition
+waits for a fresh Station or Catacrom host snapshot. The host's current mission
+is loaded directly; the guest's saved planet is not visited. Transitions and stale
+snapshots keep the loading popup open. Cancel stops before the level transition.
+This reuses native save/co-op initialization; it does not copy the host's entire
+save, inventory or progression yet.
+
+Mission and planet selection are host-controlled. A joining guest follows the
+native screen and highlighted item, without activating its selection callbacks.
+The host's normal mission transition loads the next mission on both systems.
+Ordinary Start/pause and vendor screens remain independent. This observer path
+still needs live verification; it currently covers Station and Catacrom only.
+
 ## Connection UI
 
 Co-op owns the optional MOD MENU -> Online tab; Online remains the transport.
@@ -19,7 +67,8 @@ active, so the movie cannot interrupt a menu that owns controller input.
   opens as `0.0.0.0`.
 - Host Port and Local Port support Left/Right adjustment, including held-button
   repeat. X opens the same popup in Port mode, limited to 1 through 65535.
-- D-pad selects a key; holding a direction repeats after a short delay. X inserts
+- D-pad or left stick selects a key; holding a direction repeats after 0.75 seconds,
+  then once every 0.1 seconds. X inserts
   the selected key once per press. L1/R1 moves the text cursor;
   Square or the wide Delete key removes the character before it. Done, Start or
   R2 validates/applies; Triangle cancels without changing the old value. The
@@ -27,6 +76,8 @@ active, so the movie cannot interrupt a menu that owns controller input.
   The cursor blinks while idle and becomes visible immediately after editing.
 - Number/punctuation keys are square in render pixels. The panel, input field
   and paired Delete/Done row follow the same keypad width.
+- Keypad sounds match the native multiplayer profile keyboard: open `0x07`,
+  close `0x08`, navigate `0x15`, insert `0x16` and delete `0x1a`.
 - Right stick moves the whole popup, stopping its outer frame at the screen
   edges. Small stick drift is ignored; reopening centers the popup.
 - The PS5-style keypad keeps both `.` and `-` visible. IP enables only `.`,
@@ -46,6 +97,8 @@ The numpad has no Mod Menu dependency.
 Standalone callers can feed raw right-stick X/Y bytes (centered at 127) to
 `coopNumpadMove` each frame. Mod Menu supplies these through `getRightStick`,
 using the original captured input before gameplay controls are blocked.
+Supply the left stick to `coopNumpadNavigate` before the input update for the same
+key navigation and repeat behavior. D-pad input takes priority over the stick.
 
 The upcoming standalone UI can call `coopConnectionOpen`,
 `coopConnectionInput` and `coopConnectionDraw`, or use the numpad directly.
@@ -55,12 +108,26 @@ until released. There is no standalone opening shortcut. Load/Save/Request are
 also callable without Mod Menu; initialize through `coopConnectionInit` first.
 The current Mod Menu bridge supplies capture, safe drawing and release handling.
 
+## Disconnect and pause controls
+
+Triangle back from save selection or the Host/Join address screens disconnects
+first, showing "Disconnecting..." until shutdown completes. There are no separate
+Disconnect buttons on those boot screens. In-game pause menus retain DISCONNECT
+and HOST OPTIONS for a host. Host Options currently contains
+Back; later host settings can be added there. MORE keeps the original pause
+options reachable within the native eight-row limit, including MOD MENU.
+
+Options > Load is disabled during a session. Confirming Quit disconnects before
+returning to the main menu; choosing No keeps the session. Selecting Single Player
+or Multiplayer at boot also disconnects first. Disconnect leaves the loaded level
+open with neutral remote input and preserves saved connection settings.
+
 ## Player and world state
 
 The adapter starts ON. Host controller 1 owns player 1; guest controller 1 owns
 player 2. Each gets a full-screen camera/HUD. Start, Select, L3/R3 and menu input
-stay local. Stale remote input becomes neutral. Disconnecting hides the peer
-without returning to split-screen. Native hero slots remain allocated.
+stay local. Stale remote input becomes neutral. Both native heroes remain visible
+and allocated when a peer disconnects; the full-screen layout is retained.
 
 The host advertises its level and mission. A guest at another supported mission
 uses the normal transition. Launch mission indices and loader IDs are sent
@@ -69,7 +136,8 @@ save afterward; the isolated test cards have backups.
 
 Late joins use native co-op respawn selection and safety checks, including a
 small ground footprint and a 16-unit distance limit. If no checked point is
-available, spawning waits. Vendors, vehicles and transition states are not valid
+available, placement waits without blocking peer input or position updates.
+Vendors, vehicles and transition states are not valid
 spawn points. Position corrections preserve native movement history.
 
 ## Catacrom object test

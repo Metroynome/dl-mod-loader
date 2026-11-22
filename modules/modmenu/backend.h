@@ -7,6 +7,7 @@ int menuBackendReady(u32 mode);
 void menuBackendUpdate(u32 mode, void (*update)(void));
 u32 menuBackendButtons(u32 mode);
 u32 menuBackendRightStick(void);
+u32 menuBackendLeftStick(void);
 int menuBackendPressure(u32 button);
 void menuBackendCapture(u32 mode);
 void menuBackendRelease(void);

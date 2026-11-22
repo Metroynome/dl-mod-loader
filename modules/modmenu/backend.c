@@ -186,14 +186,14 @@ int menuBackendPressure(u32 button)
 }
 
 /*
- * NAME : menuBackendRightStick
- * DESCRIPTION : Read the right stick before menu input blocking.
+ * NAME : capturedStick
+ * DESCRIPTION : Read an analog stick before menu input blocking.
  * NOTES : Digital controllers return a centered stick.
- * ARGS :
+ * ARGS : First stick byte in the raw pad sample.
  * RETURN : Horizontal byte followed by vertical byte.
  * AUTHOR : Troy "Metroynome" Pruitt
  */
-u32 menuBackendRightStick(void)
+static u32 capturedStick(int offset)
 {
 	struct PAD* pad = currentPad(0);
 	const u8* sample;
@@ -202,7 +202,33 @@ u32 menuBackendRightStick(void)
 	sample = captured[0].pad == pad ? captured[0].sample : pad->rdata;
 	if ((sample[1] & 0xf0) != 0x70)
 		return 0x7f7f;
-	return sample[4] | (sample[5] << 8);
+	return sample[offset] | (sample[offset + 1] << 8);
+}
+
+/*
+ * NAME : menuBackendRightStick
+ * DESCRIPTION : Expose the captured right stick for popup movement.
+ * NOTES :
+ * ARGS :
+ * RETURN : Raw X/Y bytes, centered at 127.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+u32 menuBackendRightStick(void)
+{
+	return capturedStick(4);
+}
+
+/*
+ * NAME : menuBackendLeftStick
+ * DESCRIPTION : Expose the captured left stick for keypad navigation.
+ * NOTES :
+ * ARGS :
+ * RETURN : Raw X/Y bytes, centered at 127.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+u32 menuBackendLeftStick(void)
+{
+	return capturedStick(6);
 }
 
 void menuBackendCapture(u32 mode)

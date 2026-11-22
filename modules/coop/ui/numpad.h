@@ -13,7 +13,8 @@ typedef enum coopNumpadKind {
 
 /* No Mod Menu dependency. The caller owns the overlay's input capture and
  * release barrier, and draws once per frame before graphics-chain submission.
- * Input takes new presses and held buttons; only held D-pad navigation repeats.
+ * Input takes new presses and held buttons; held directions repeat.
+ * Navigate supplies raw left-stick X/Y bytes before Input, independently of Mod Menu.
  * Return values are 0 editing, 1 accepted, -1 cancelled.
  * Number accepts signed decimal text within minimum/maximum; Port accepts
  * only integers from 1 through 65535 (also constrained by the supplied limits).
@@ -24,6 +25,7 @@ void coopNumpadOpen(coopNumpadKind_e kind, const char* text, double minimum, dou
 int coopNumpadInput(u32 pressed, u32 held);
 void coopNumpadDraw(void);
 void coopNumpadMove(int horizontal, int vertical);
+void coopNumpadNavigate(int horizontal, int vertical);
 u32 coopNumpadValue(void);
 double coopNumpadNumber(void);
 const char* coopNumpadText(void);

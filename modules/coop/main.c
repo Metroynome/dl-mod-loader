@@ -4,6 +4,9 @@
 #include "objects.h"
 #include "encounters.h"
 #include "ui/connection.h"
+#include "ui/boot.h"
+#include "ui/session.h"
+#include "ui/pause.h"
 #include "boot.h"
 #include "modules/online/include/online.h"
 #include "modules/modmenu/include/modmenu.h"
@@ -43,7 +46,6 @@ static void rawPad(void* controller, u8* sample, int size, void* context);
 static void drawView(int screen, int frustum, int first, int last);
 static void applyView(int enabled);
 static void setViewHooks(int enabled);
-static void showPeer(u32 hero, int show);
 
 volatile coopControl_t moduleExports DL_MODULE_EXPORTS;
 static const moduleApi_t* loader;
@@ -53,10 +55,8 @@ static coopPad_t pads[2];
 static u32 remoteTime;
 static int active, allowInput, sourceValid, remoteValid, tab;
 static int viewInstalled, viewWanted, viewHooks, viewPlayer, viewLevel;
-static int localRole = ONLINE_HOST, connected, spawned, peerPresent;
-static u32 session, peerSession, spawnSession, hiddenHero, hiddenMoby;
-static u16 savedHidden;
-static int savedCollision;
+static int localRole = ONLINE_HOST, connected, spawned;
+static u32 session, peerSession, spawnSession;
 static float spawnPosition[3];
 static u32 savedFrustums[20];
 static u32 savedWideFrustums[2];
@@ -794,19 +794,21 @@ static void rawPad(void* controller, u8* sample, int size, void* context)
 				sourceValid = 0;
 			}
 			neutral(idle);
-			if (!gameplay)
+			if (role == ONLINE_JOIN && coopSessionWatching())
+				replacement = idle;
+			else if (!gameplay)
 				replacement = i == 1 ? idle : 0;
 			else if (role == ONLINE_HOST && i == 1)
-				replacement = peerPresent && remoteValid && ticks() - remoteTime < INPUT_TIMEOUT ? moduleExports.remoteSample : idle;
+				replacement = connected && remoteValid && ticks() - remoteTime < INPUT_TIMEOUT ? moduleExports.remoteSample : idle;
 			else if (role == ONLINE_JOIN)
 				replacement = i == 1 ? (sourceValid ? moduleExports.sourceSample : idle) :
-				    remoteValid && ticks() - remoteTime < INPUT_TIMEOUT ? moduleExports.remoteSample : idle;
+				    connected && remoteValid && ticks() - remoteTime < INPUT_TIMEOUT ? moduleExports.remoteSample : idle;
 			if (replacement) {
 				for (j = 2; j < size && j < COOP_SAMPLE_BYTES; ++j)
 					sample[j] = replacement[j];
 				sample[2] |= MENU_BUTTONS & 255;
 				sample[3] |= MENU_BUTTONS >> 8;
-				if (i == 0) {
+				if (i == 0 && !coopSessionWatching()) {
 					sample[2] = (sample[2] & ~(MENU_BUTTONS & 255)) | (localMenu & 255);
 					sample[3] = (sample[3] & ~(MENU_BUTTONS >> 8)) | (localMenu >> 8);
 				}
@@ -878,11 +880,12 @@ static void registerMenu(void)
 static void deactivate(void)
 {
 	active = 0;
+	coopSessionReset();
+	coopPauseReset(loader);
+	coopBootDeactivate();
 	coopConnectionDeactivate();
 	coopEncountersReset(loader);
 	coopObjectsReset();
-	if (hiddenHero && (Level == 21 || Level == 22))
-		showPeer(hiddenHero, 1);
 	releasePads();
 	if (menu && tab)
 		menu->removeTab(tab);
@@ -919,6 +922,7 @@ int moduleInit(const moduleApi_t* api)
 	moduleExports.magic = COOP_MAGIC;
 	moduleExports.size = sizeof(moduleExports);
 	moduleExports.enabled = 1;
+	coopBootInit(api, &moduleExports);
 	api->setLifecycle(activate, deactivate);
 	return 0;
 }
@@ -935,38 +939,6 @@ static int stableState(void)
 {
 	u32 address = GetAddressImmediate(&vaCoopGameMode);
 	return address && (WORD(address) == GAME_MODE_NORMAL || WORD(address) == 3);
-}
-
-/*
- * NAME : showPeer
- * DESCRIPTION : Hide the absent peer without releasing native co-op player storage.
- * NOTES : Preserve unrelated moby flags and restore only the hidden bit we own.
- * ARGS : Remote hero and whether the peer is present.
- * RETURN :
- * AUTHOR : Troy "Metroynome" Pruitt
- */
-static void showPeer(u32 hero, int show)
-{
-	u32 moby = WORD(hero + 0x2ef0);
-	if (moby < 0x100000 || moby >= 0x2000000)
-		return;
-	if (hiddenHero && (hiddenHero != hero || hiddenMoby != moby)) {
-		hiddenHero = hiddenMoby = 0;
-	}
-	if (!show) {
-		if (!hiddenHero) {
-			hiddenHero = hero;
-			hiddenMoby = moby;
-			savedHidden = *(u16*)(moby + 0x34) & 0x80;
-			savedCollision = WORD(moby + 0x9c);
-		}
-		*(u16*)(moby + 0x34) |= 0x80;
-		WORD(moby + 0x9c) = 0;
-	} else if (hiddenHero) {
-		*(u16*)(moby + 0x34) = (*(u16*)(moby + 0x34) & ~0x80) | savedHidden;
-		WORD(moby + 0x9c) = savedCollision;
-		hiddenHero = hiddenMoby = 0;
-	}
 }
 
 /*
@@ -1008,7 +980,9 @@ static int safeSpawn(float* position)
 		if (!((int (*)(float*))address)(point))
 			return 0;
 		/* A checker moving an edge probe elsewhere does not prove support. */
-		if (point[0] != position[0] + offsets[i][0] || point[1] != position[1] + offsets[i][1] || point[2] != position[2])
+		if (!(point[0] >= position[0] + offsets[i][0] - 0.25f && point[0] <= position[0] + offsets[i][0] + 0.25f &&
+		    point[1] >= position[1] + offsets[i][1] - 0.25f && point[1] <= position[1] + offsets[i][1] + 0.25f &&
+		    point[2] >= position[2] - 1.0f && point[2] <= position[2] + 1.0f))
 			return 0;
 	}
 	return 1;
@@ -1024,12 +998,27 @@ static int safeSpawn(float* position)
  */
 static int selectSpawn(u32 hero, u32 host, float* position)
 {
+	static const float offsets[4][2] = {{2, 0}, {-2, 0}, {0, 2}, {0, -2}};
 	float point[4] __attribute__((aligned(16)));
 	float delta, distance = 0;
 	u32 spawn, address = GetAddressImmediate(&vaCoopPlayerBestSpawn);
-	int i;
+	int i, j;
 	if (!stableState() || !address || WORD(address) != 0x27bdffd0)
 		return 0;
+	/* Validate nearby ground before falling back to the native spawn history.
+	 * History can contain only distant points immediately after loading a save. */
+	for (i = 0; i < 4; ++i) {
+		for (j = 0; j < 3; ++j)
+			point[j] = ((float*)(host + 0xa0))[j];
+		point[0] += offsets[i][0];
+		point[1] += offsets[i][1];
+		point[3] = 0;
+		if (safeSpawn(point)) {
+			for (j = 0; j < 3; ++j)
+				position[j] = point[j];
+			return 1;
+		}
+	}
 	spawn = ((u32 (*)(u32))address)(hero);
 	if (spawn < 0x100000 || spawn > 0x1ffffe0 || (spawn & 15))
 		return 0;
@@ -1081,7 +1070,7 @@ static int spawnPeer(u32 hero, const float* position)
 /*
  * NAME : moduleUpdate
  * DESCRIPTION : Exchange current pad snapshots through the generic Online API.
- * NOTES : Peers supply input/position; the host supplies world state and health.
+ * NOTES : Valid peer input and position do not wait for optional spawn placement.
  * ARGS :
  * RETURN :
  * AUTHOR : Troy "Metroynome" Pruitt
@@ -1098,13 +1087,14 @@ void moduleUpdate(void)
 	registerMenu();
 	online = onlineFind(loader);
 	coopConnectionUpdate(online);
+	coopPauseUpdate(loader, online);
+	coopBootUpdate();
 	worldSent = coopEncountersUpdate(loader, online, moduleExports.enabled);
 	worldSent |= coopWorldUpdate(loader, online, moduleExports.enabled);
 	coopObjectsUpdate(loader, online, moduleExports.enabled, coopWorldReady(), 1);
 	if (!moduleExports.enabled || !supported()) {
 		moduleExports.state = !moduleExports.enabled ? COOP_OFF : COOP_UNSUPPORTED;
-		connected = spawned = peerPresent = 0;
-		hiddenHero = hiddenMoby = 0;
+		connected = spawned = 0;
 		releasePads();
 		return;
 	}
@@ -1125,12 +1115,10 @@ void moduleUpdate(void)
 	}
 	role = online ? online->role() : 0;
 	if (role && (!connected || role != localRole)) {
-		if (hiddenHero)
-			showPeer(hiddenHero, 1);
 		localRole = role;
 		session = ticks() | 1;
 		peerSession = spawnSession = 0;
-		spawned = peerPresent = remoteValid = 0;
+		spawned = remoteValid = 0;
 	}
 	connected = role != 0;
 	moduleExports.state = connected ? COOP_ACTIVE : COOP_WAITING;
@@ -1147,31 +1135,26 @@ void moduleUpdate(void)
 		coopObjectsReceive(frame.objects, frame.objectBytes);
 		if (peerSession != frame.session) {
 			peerSession = frame.session;
-			spawnSession = spawned = peerPresent = 0;
+			spawnSession = spawned = 0;
 		}
 		if (localRole == ONLINE_HOST && ready && (frame.flags & PEER_READY)) {
 			if (spawnSession != peerSession) {
 				if (selectSpawn(remoteHero, localHero, spawnPosition) && spawnPeer(remoteHero, spawnPosition))
 					spawnSession = peerSession;
 			}
-			peerPresent = spawnSession == peerSession && (frame.flags & PEER_SPAWNED) && frame.spawnSession == peerSession;
 		} else if (localRole == ONLINE_JOIN && ready && (frame.flags & PEER_READY)) {
 			if (!spawned && frame.spawnSession == session && spawnPeer(localHero, frame.spawn))
 				spawned = 1;
-			peerPresent = spawned;
 		}
 		for (j = 0; j < COOP_SAMPLE_BYTES; ++j)
 			moduleExports.remoteSample[j] = frame.sample[j];
 		remoteTime = ticks();
 		remoteValid = 1;
 		++moduleExports.received;
-		if (peerPresent && allowInput && gameplayInput() && *(float*)(remoteHero + 0x2e20) > 0)
+		if (allowInput && gameplayInput() && *(float*)(remoteHero + 0x2e20) > 0)
 			correctPosition(&frame, remoteHero);
 	}
 	moduleExports.stale = !remoteValid || ticks() - remoteTime >= INPUT_TIMEOUT;
-	if (!connected || moduleExports.stale)
-		peerPresent = 0;
-	showPeer(remoteHero, peerPresent);
 	if (!connected)
 		return;
 	frame.session = session;

@@ -106,6 +106,7 @@ typedef struct modMenuApi {
 	/* Current held buttons from the same captured pad sample as modal presses. */
 	/* 0x60 */ u32 (*getButtons)(void);
 	/* 0x64 */ u32 (*getRightStick)(void); /* Raw X/Y bytes, centered at 127. */
+	/* 0x68 */ u32 (*getLeftStick)(void); /* Same captured sample and byte layout. */
 } modMenuApi_t;
 
 /* Look this up again after mode changes; absence is normal, not fatal.

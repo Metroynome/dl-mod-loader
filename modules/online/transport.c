@@ -103,15 +103,17 @@ void onlineTransportInit(const moduleApi_t* api)
 
 /*
  * NAME : onlineTransportSupported
- * DESCRIPTION : Keep driver startup out of the boot and multiplayer overlays.
+ * DESCRIPTION : Allow boot-menu connection checks and loaded campaign maps.
  * NOTES : NTSC-U Deadlocked backend; other games need their own backend verification.
  * ARGS :
- * RETURN : Nonzero for a loaded campaign or Cooperative map.
+ * RETURN : Nonzero for the verified boot overlay, campaign or Cooperative map.
  * AUTHOR : Troy "Metroynome" Pruitt
  */
 int onlineTransportSupported(void)
 {
 	int level = *(volatile int*)0x21de10;
+	if (level <= 1 && *(volatile u32*)0x438420 == 0x8f828859)
+		return 1;
 	return level >= 1 && level <= 35;
 }
 
@@ -128,6 +130,7 @@ int onlineTransportReady(void)
 	if (failed)
 		return -1;
 	if (stage < 5) {
+		loader->print("online: loading network driver %d/5: %s\n", stage + 1, drivers[stage]);
 		if (install(drivers[stage]) < 0) {
 			failed = 1;
 			return -1;
