@@ -70,11 +70,17 @@ The emulator log identifies which driver failed.
 ## Adapter messages
 
 Call `onlineFind(loader)` and check `role()` before exchanging snapshots. `send`
-queues up to 224 bytes tagged with a channel ID. Newer input replaces an
-unsent message on the same channel; another channel waits until it is sent. `receive` consumes the newest message for that channel and returns
-its length. Wrong-peer, wrong-session and reordered messages are discarded.
+queues up to 224 bytes tagged with a channel ID. Four persistent channel slots
+keep independent latest outgoing and incoming messages. A new snapshot replaces
+only an unsent snapshot on the same channel. Pending channels are sent in round-robin
+order; a busy RPC leaves the selected message queued. `receive` consumes the latest
+message for its channel. Wrong-peer/session packets and older messages on that same
+channel are discarded; reordering between channels does not discard valid updates.
+Polling targets up to 60 Hz and stays nonblocking. Slots reset on reconnect.
 An adapter may multiplex channels. The transport does not provide reliable
-event delivery; Co-op adds acknowledgements for object batches. Wire protocol
+event delivery. API 3 also provides `sendEvent`, which refuses to replace an unsent
+message on the same channel; adapters own acknowledgements and retries. Co-op uses
+this for critical object events. Wire protocol
 revision 3 requires matching builds on both
 systems. PINE mailbox offsets are unchanged.
 

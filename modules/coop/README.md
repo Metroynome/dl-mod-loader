@@ -141,27 +141,37 @@ available, placement waits without blocking peer input or position updates.
 Vendors, vehicles and transition states are not valid
 spawn points. Position corrections preserve native movement history.
 
-## Catacrom object test
+## Catacrom moby rewrite
 
-The host runs the original logic for these initial classes:
+This is a replacement backend, not a second system layered over the old snapshots.
+The first adapter supports Blade Balls only. Robot zombies, DZ strikers, pickups,
+vehicles and destructibles currently keep their native behavior and are not yet
+replicated by this backend. Use a Blade Ball encounter when testing this backend.
 
-- Bladeballs, robot zombies and DZ strikers.
-- Health containers/orbs, bolt crates and ammo crates.
-- Destructible barricades.
+The host owns AI, attack/damage/death decisions and rewards. Native encounter wake
+replay remains responsible for producing matching local instances. Reliable create,
+critical-state and removal events bind those instances to registry IDs that are not
+reused within an epoch. Each object revision is acknowledged independently; a missing
+local enemy does not block other enemies or player/progression synchronization.
 
-The guest matches local objects by UID and class and substitutes a replica
-update. Host snapshots supply position, rotation, state, health, visibility and
-collision activation. Animation IDs, frames and speeds use the guest model�s native sequence transition, without running its enemy AI. Animation decoding is deferred to the native moby update; packet receipt only queues the change. The initial batches are acknowledged and retransmitted. Ongoing changes use repeated snapshots without waiting for per-batch acknowledgements; positions blend between updates. Up to two enemy records travel alongside each player snapshot, so enemy traffic does not take separate input-transmission slots. Moving animations run locally between sequence changes; static pickups do not send animation frames. Duplicate/older packets are ignored. Recycled local slots and ambiguous IDs are
-rejected. UID-zero static health orbs additionally require matching map slots and starting positions. A maximum of 128 objects is tracked. Unchanged acknowledged records are skipped after the initial pass.
+Replaceable motion travels alongside player input, with four compact records per
+128-byte payload. Guest presentation interpolates transforms and changes native
+animation sequences from the moby's update pass. No pVars, pointers or native Guber
+identities are copied. Native netObject fields remain untouched.
 
-After a complete accepted object pass, the guest copies host bolts, shared XP and points. Host health for both players updates independently, even if an object cannot be matched. Host deaths enter the native body state at the next draw boundary so normal death/respawn logic can run. These changes still need a live combat check. This does not copy inventory or mission-objective internals.
+Critical events use Online API 3's sendEvent backpressure and adapter-owned retries;
+movement uses its latest-snapshot send path. Both peers need the same Online and Co-op
+builds. Old object packets are rejected. Session, level and mission changes reset the
+registry and restore only callbacks still owned by this backend. A removed ID cannot
+be revived by stale movement or create messages.
 
-This is an initial replica test, not full world synchronization. It cannot
-create missing objects or replace an object's class. Vehicles, projectiles,
-platforms, shields, enemy-specific internal variables,
-mission completion and save persistence need further work.
-Disconnecting releases replica callbacks and restores their pre-replica logical
-state; preserving an entire host world after disconnect is not implemented.
+NTSC-U Catacrom Blade Ball movement, attack animations, kill synchronization,
+regular player flinches and inactive-object cleanup were checked in two PCSX2 instances.
+Regular flinches use host-confirmed state-entry counters and native animation/sound
+without applying collision damage again. Shared health changes reveal the health HUD.
+Special hit reactions and exact knockback direction are not yet replicated.
+See [MOBY-SYNC.md](notes/MOBY-SYNC.md) for the native-code findings and limitations.
+These checks do not verify full native Guber/Medius integration or other enemy types.
 
 ## Catacrom encounter test
 
@@ -175,15 +185,19 @@ replaying them. Dormant enemies retain their native setup until activated.
 This first test handles existing map enemies, with a bounded history of 128 wake
 events per loaded mission. Missing dynamic objects are rejected after a timeout;
 creating them, syncing full wave progression and adapting other enemy classes
-remain unfinished. Ongoing enemy snapshots still provide host-owned movement,
-health and animation corrections. This does not make independent AI deterministic.
+remain unfinished. The replacement registry provides movement, health and animation
+replication for Blade Balls only. This does not make unsupported enemy AI deterministic.
 Only Catacrom's NTSC-U encounter hooks are enabled. The other maps now have
 static address mappings, but their encounter behavior still needs live testing.
 
 ## Verification
 
 Station-to-Catacrom following, matching players, full-screen cameras and HUDs
-were verified in PCSX2. The initial 44-object pass, including both UID-zero health orbs, was accepted with no missing matches. Combat and animation checks are still pending. The NTSC-U build, relocation and mocked packet/lifetime checks pass.
+were verified in PCSX2 before this rewrite. The former generic object pass was
+replaced and is not evidence for the current registry. The replacement passed
+NTSC-U/PAL/NTSC-J/NTSC-K builds and relocation checks, plus protocol/lifetime
+models. The subsequent NTSC-U gameplay checks cover the Blade Ball behavior listed above;
+other regions and enemy adapters remain unverified.
 The selected player's view is drawn on the first native pass, before the game's inter-pass render helper. Waiting for player 2's original pass caused stale drawing and Start-menu trails on the guest.
 Live adapter disable/split-screen restoration remains unverified after an
 earlier native renderer fault. Native Online Play is not supported by this
@@ -193,7 +207,7 @@ Test guest keyboard: WASD movement, IJKL camera, X Cross, Z Square, C Circle,
 Backspace Triangle, Enter Start, Q/E L1/R1, 1/3 L2/R2, F/H L3/R3. Guest SDL input
 is disabled so the host's physical controller does not control both instances.
 
-Full-screen HUD getters remain overridden while the co-op view is active, since native GUI initialization resets the player layout fields. The refreshed HUD layout and Bladeball replication still need visual verification.
+Full-screen HUD getters remain overridden while the co-op view is active, since native GUI initialization resets the player layout fields. Full-screen HUD placement was visually checked on both test instances.
 
 ## Native address tables
 

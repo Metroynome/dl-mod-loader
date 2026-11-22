@@ -5,7 +5,7 @@
 
 #define ONLINE_MAGIC (0x314e4c44)
 #define ONLINE_SERVICE_ID (0x4f4e4c4e)
-#define ONLINE_API_VERSION (2)
+#define ONLINE_API_VERSION (3)
 #define ONLINE_MESSAGE_BYTES (224)
 
 typedef enum onlineCommand {
@@ -57,6 +57,8 @@ typedef struct onlineApi {
 	/* Queue a transport command; acknowledgements/status remain in control.
 	 * Host binds hostPort; Join binds localPort. No UI or settings dependency. */
 	/* 0x18 */ int (*request)(u32 command, u32 address, u16 hostPort, u16 localPort);
+	/* Backpressure for critical events; retry/acknowledgement belongs to the adapter. */
+	/* 0x1c */ int (*sendEvent)(u32 channel, const void* data, int size);
 } onlineApi_t;
 
 static inline const onlineApi_t* onlineFind(const moduleApi_t* loader)

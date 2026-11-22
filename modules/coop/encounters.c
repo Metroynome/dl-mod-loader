@@ -442,6 +442,7 @@ static void wakeMoby(u32 moby, int placed, u32 reference, u32 wave, u32 controll
 		}
 	}
 	((void (*)(u32, int, u32, u32, u32))GetAddressImmediate(&vaWakeMoby))(moby, placed, reference, wave, controller);
+	coopObjectsWake(moby);
 }
 
 /*

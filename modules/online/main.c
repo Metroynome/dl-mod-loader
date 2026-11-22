@@ -7,7 +7,8 @@
 #define KEEPALIVE (3)
 #define MESSAGE (4)
 #define PROTOCOL_VERSION (3)
-#define POLL_INTERVAL (4000000)
+#define POLL_INTERVAL (2457600) /* EE Count: up to 60 nonblocking polls per second. */
+#define CHANNEL_SLOTS (4)
 #define SEND_INTERVAL (90000000)
 #define TIMEOUT (1500000000)
 
@@ -31,20 +32,22 @@ typedef struct onlineMessage {
 
 static int sessionRole(void);
 static int sendMessage(u32 channel, const void* data, int size);
+static int sendEvent(u32 channel, const void* data, int size);
 static int receiveMessage(u32 channel, void* data, int capacity);
 static int request(u32 command, u32 address, u16 hostPort, u16 localPort);
 
 volatile onlineControl_t moduleExports DL_MODULE_EXPORTS;
 static const onlineApi_t onlineApi = {
-	ONLINE_API_VERSION, sizeof(onlineApi_t), &moduleExports, sessionRole, sendMessage, receiveMessage, request
+	ONLINE_API_VERSION, sizeof(onlineApi_t), &moduleExports, sessionRole, sendMessage, receiveMessage, request, sendEvent
 };
 static const moduleApi_t* loader;
 static onlineRpc_t operation;
 static u32 pollTime, sendTime, receivedTime, startTime, clientToken, hostToken, peerAddress;
 static u16 peerPort;
 static int role, phase, waiting, active, stopping;
-static onlineMessage_t outgoing, incoming;
-static u32 sendSequence, receiveSequence;
+static onlineMessage_t outgoing[CHANNEL_SLOTS], incoming[CHANNEL_SLOTS];
+static u32 sendSequence;
+static int sendCursor;
 static int outgoingReady, incomingReady, peerConfirmed;
 
 /*
@@ -58,7 +61,10 @@ static int outgoingReady, incomingReady, peerConfirmed;
 static void resetMessages(void)
 {
 	outgoingReady = incomingReady = peerConfirmed = 0;
-	sendSequence = receiveSequence = 0;
+	sendSequence = 0;
+	sendCursor = 0;
+	memset(outgoing, 0, sizeof(outgoing));
+	memset(incoming, 0, sizeof(incoming));
 }
 
 /*
@@ -75,45 +81,88 @@ static int sessionRole(void)
 }
 
 /*
+ * NAME : channelSlot
+ * DESCRIPTION : Find a channel's persistent slot or reserve an unused slot.
+ * NOTES : Slots are cleared on session reset; no other channel is evicted.
+ * ARGS : Message slots and a nonzero channel ID.
+ * RETURN : Slot index, or minus one when all slots are occupied.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+static int channelSlot(onlineMessage_t* slots, u32 channel)
+{
+	int i, available = -1;
+	for (i = 0; i < CHANNEL_SLOTS; ++i) {
+		if (slots[i].channel == channel)
+			return i;
+		if (!slots[i].channel && available < 0)
+			available = i;
+	}
+	return available;
+}
+
+/*
  * NAME : sendMessage
  * DESCRIPTION : Queue the latest adapter message without blocking.
- * NOTES : Replaces an unsent snapshot instead of accumulating latency.
+ * NOTES : Each channel keeps its newest snapshot; channels cannot replace one another.
  * ARGS : Channel, payload and byte count.
  * RETURN : Zero accepted, negative unavailable/invalid.
  * AUTHOR : Troy "Metroynome" Pruitt
  */
 static int sendMessage(u32 channel, const void* data, int size)
 {
+	int slot;
 	if (!sessionRole() || !channel || !data || size <= 0 || size > ONLINE_MESSAGE_BYTES)
 		return -1;
-	/* Preserve another channel's queued packet until the IOP consumes it.
-	 * Input on the same channel still keeps only its newest snapshot. */
-	if (outgoingReady && outgoing.channel != channel)
+	slot = channelSlot(outgoing, channel);
+	if (slot < 0)
 		return -1;
-	outgoing.channel = channel;
-	outgoing.length = size;
-	memcpy(outgoing.data, data, size);
-	outgoingReady = 1;
+	outgoing[slot].channel = channel;
+	outgoing[slot].length = size;
+	memcpy(outgoing[slot].data, data, size);
+	outgoingReady |= 1 << slot;
 	return 0;
+}
+
+/*
+ * NAME : sendEvent
+ * DESCRIPTION : Queue an event without replacing an unsent message on its channel.
+ * NOTES : This supplies backpressure, not UDP reliability; adapters retain and acknowledge events.
+ * ARGS : Channel, event payload and byte count.
+ * RETURN : Zero accepted, negative unavailable or busy.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+static int sendEvent(u32 channel, const void* data, int size)
+{
+	int slot;
+	if (!sessionRole() || !channel)
+		return -1;
+	slot = channelSlot(outgoing, channel);
+	if (slot < 0 || (outgoingReady & (1 << slot)))
+		return -1;
+	return sendMessage(channel, data, size);
 }
 
 /*
  * NAME : receiveMessage
  * DESCRIPTION : Consume the newest message for the active adapter channel.
- * NOTES : Older/reordered UDP messages are discarded before queuing.
+ * NOTES : Sequence checks are per channel; cross-channel reordering loses no unread data.
  * ARGS : Channel, destination and capacity.
  * RETURN : Bytes copied, zero empty, negative invalid capacity.
  * AUTHOR : Troy "Metroynome" Pruitt
  */
 static int receiveMessage(u32 channel, void* data, int capacity)
 {
-	if (!sessionRole() || !incomingReady || incoming.channel != channel)
+	int slot;
+	if (!sessionRole() || !channel)
 		return 0;
-	if (!data || capacity < incoming.length)
+	slot = channelSlot(incoming, channel);
+	if (slot < 0 || !(incomingReady & (1 << slot)))
+		return 0;
+	if (!data || capacity < incoming[slot].length)
 		return -1;
-	memcpy(data, incoming.data, incoming.length);
-	incomingReady = 0;
-	return incoming.length;
+	memcpy(data, incoming[slot].data, incoming[slot].length);
+	incomingReady &= ~(1 << slot);
+	return incoming[slot].length;
 }
 
 /*
@@ -197,6 +246,7 @@ static void receivePacket(const onlineRpc_t* reply, u32 now)
 {
 	onlinePacket_t packet;
 	onlineMessage_t message;
+	int slot;
 	if (reply->length < sizeof(packet))
 		return;
 	memcpy(&packet, reply->data, sizeof(packet));
@@ -210,12 +260,14 @@ static void receivePacket(const onlineRpc_t* reply, u32 now)
 		memset(&message, 0, sizeof(message));
 		memcpy(&message, reply->data, reply->length);
 		if (!message.channel || !message.length || message.length > ONLINE_MESSAGE_BYTES ||
-		    reply->length != 0x1c + message.length || (int)(message.sequence - receiveSequence) <= 0)
+		    reply->length != 0x1c + message.length || !message.sequence)
 			return;
-		receiveSequence = message.sequence;
+		slot = channelSlot(incoming, message.channel);
+		if (slot < 0 || (incoming[slot].sequence && (int)(message.sequence - incoming[slot].sequence) <= 0))
+			return;
 		peerConfirmed = 1;
-		memcpy(&incoming, &message, sizeof(incoming));
-		incomingReady = 1;
+		memcpy(&incoming[slot], &message, sizeof(message));
+		incomingReady |= 1 << slot;
 		++moduleExports.received;
 		receivedTime = now;
 		return;
@@ -320,7 +372,7 @@ void moduleUpdate(void)
 	onlineRpc_t reply;
 	onlinePacket_t packet;
 	u32 now = ticks();
-	int result;
+	int result, selected = -1, i;
 	++moduleExports.heartbeat;
 	if (moduleExports.requestId != moduleExports.acceptedId) {
 		moduleExports.acceptedId = moduleExports.requestId;
@@ -417,21 +469,36 @@ void moduleUpdate(void)
 		operation.length = sizeof(packet);
 		memcpy(operation.data, &packet, sizeof(packet));
 		if (outgoingReady && peerConfirmed && moduleExports.status == ONLINE_CONNECTED) {
-			outgoing.header = packet;
-			outgoing.header.kind = MESSAGE;
-			outgoing.sequence = ++sendSequence;
-			outgoing.reserved = 0;
-			operation.length = 0x1c + outgoing.length;
-			memcpy(operation.data, &outgoing, operation.length);
-			outgoingReady = 0;
+			for (i = 0; i < CHANNEL_SLOTS; ++i) {
+				int slot = (sendCursor + i) % CHANNEL_SLOTS;
+				if (outgoingReady & (1 << slot)) {
+					selected = slot;
+					break;
+				}
+			}
+			if (selected >= 0) {
+				outgoing[selected].header = packet;
+				outgoing[selected].header.kind = MESSAGE;
+				outgoing[selected].sequence = sendSequence + 1;
+				if (!outgoing[selected].sequence)
+					outgoing[selected].sequence = 1;
+				outgoing[selected].reserved = 0;
+				operation.length = 0x1c + outgoing[selected].length;
+				memcpy(operation.data, &outgoing[selected], operation.length);
+			}
 		}
 		sendTime = now;
 		++moduleExports.sent;
 	}
 	result = onlineTransportRequest(phase, &operation);
-	if (result > 0)
+	if (result > 0) {
 		waiting = 1;
-	else if (result < 0) {
+		if (selected >= 0) {
+			sendSequence = outgoing[selected].sequence;
+			outgoingReady &= ~(1 << selected);
+			sendCursor = (selected + 1) % CHANNEL_SLOTS;
+		}
+	} else if (result < 0) {
 		moduleExports.error = -4;
 		moduleExports.status = ONLINE_FAILED;
 	}

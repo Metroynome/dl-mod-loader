@@ -12,6 +12,7 @@ void coopObjectsReceive(const void* data, int bytes);
 int coopObjectsWrite(void* data);
 int coopObjectsBounds(u32* start, u32* end);
 int coopObjectsEnemyClass(u16 oClass);
+void coopObjectsWake(u32 moby);
 void coopObjectsReset(void);
 
 #endif

@@ -7,7 +7,7 @@
 #include <librac4/player.h>
 
 #define WORLD_CHANNEL (0x444c4357)
-#define WORLD_MAGIC (0x33574344)
+#define WORLD_MAGIC (0x34574344)
 #define WORLD_INTERVAL (30000000)
 #define WORLD_MENU_INTERVAL (5000000)
 #define WORLD_READY (1)
@@ -26,10 +26,17 @@ typedef struct coopWorld {
 	/* 0x2c */ int missionLink;
 	/* 0x30 */ int playerState[2];
 	/* 0x38 */ coopSessionMenu_t menu;
+	/* 0x44 */ u32 hitEpoch;
+	/* 0x48 */ u32 hitSequence[2];
 } coopWorld_t;
+
+typedef char coopWorldSize[(sizeof(coopWorld_t) == 0x50) ? 1 : -1];
 
 static u32 lastSent;
 static int pendingDeath[2], deathLevel, deathMission;
+static int pendingHit[2], previousHitState[2];
+static int hitLevel, hitMission, hitRole;
+static u32 hitEpoch, hitSequence[2];
 
 static int requestedLevel, requestedMission = -1;
 static coopHostSession_t hostSession;
@@ -211,15 +218,31 @@ static void applySharedStats(const coopWorld_t* frame)
 	deathMission = Mission->ActiveMission;
 	for (i = 0; i < 2; ++i) {
 		hero = WORD(heroes + i * 4);
+		/* Native Inc/DecHitPoints reveal the health HUD for six seconds. */
+		if (*(float*)(hero + 0x2e20) != frame->health[i])
+			WORD(hero + 0x2ed8) = 360;
 		*(float*)(hero + 0x2f24) = frame->maxHealth[i];
 		*(float*)(hero + 0x2e20) = frame->health[i] > 0 ? frame->health[i] : 0;
 		pendingDeath[i] = frame->health[i] <= 0 || playerStateIsDead(frame->playerState[i]);
+	}
+	if (hitEpoch != frame->hitEpoch) {
+		hitEpoch = frame->hitEpoch;
+		pendingHit[0] = pendingHit[1] = 0;
+		for (i = 0; i < 2; ++i)
+			hitSequence[i] = frame->hitSequence[i];
+	} else {
+		for (i = 0; i < 2; ++i) {
+			if ((int)(frame->hitSequence[i] - hitSequence[i]) <= 0)
+				continue;
+			hitSequence[i] = frame->hitSequence[i];
+			pendingHit[i] = !pendingDeath[i];
+		}
 	}
 }
 
 /*
  * NAME : coopWorldApplyPlayers
- * DESCRIPTION : Enter replicated deaths through the normal native body state.
+ * DESCRIPTION : Enter confirmed hits and deaths through the native body state.
  * NOTES : Called before drawing, never from an interrupting packet callback.
  * ARGS :
  * RETURN :
@@ -231,13 +254,15 @@ void coopWorldApplyPlayers(void)
 	int i;
 	if (deathLevel != Level || deathMission != Mission->ActiveMission) {
 		pendingDeath[0] = pendingDeath[1] = 0;
+		pendingHit[0] = pendingHit[1] = 0;
 		return;
 	}
-	if ((!pendingDeath[0] && !pendingDeath[1]) || !coopWorldReady() || !init || WORD(init) != 0x27bdff20)
+	if ((!pendingDeath[0] && !pendingDeath[1] && !pendingHit[0] && !pendingHit[1]) ||
+	    !coopWorldReady() || !init || WORD(init) != 0x27bdff20)
 		return;
 	heroes = GetAddressImmediate(&vaCoopPlayers);
 	for (i = 0; i < 2; ++i) {
-		if (!pendingDeath[i])
+		if (!pendingDeath[i] && !pendingHit[i])
 			continue;
 		hero = WORD(heroes + i * 4);
 		if (hero < 0x100000 || hero > 0x1ffd000 || WORD(hero + 0x2f10) != (u32)i)
@@ -245,9 +270,58 @@ void coopWorldApplyPlayers(void)
 		vtable = WORD(hero + 0x14);
 		if (vtable < 0x100000 || vtable > 0x1ffffc0 || WORD(vtable + 0x3c) != init)
 			continue;
-		pendingDeath[i] = 0;
-		if (!playerStateIsDead(WORD(hero + 0x25cc)))
-			((void (*)(u32, int, int, int, int))init)(hero, PLAYER_STATE_DEATH, 1, 1, 1);
+		if (pendingDeath[i]) {
+			pendingDeath[i] = pendingHit[i] = 0;
+			if (!playerStateIsDead(WORD(hero + 0x25cc)))
+				((int (*)(u32, int, int, int, int))init)(hero, PLAYER_STATE_DEATH, 1, 1, 1);
+		} else {
+			u32 moby = WORD(hero + 0x2ef0);
+			u32 mode = GetAddressImmediate(&vaCoopGameMode);
+			pendingHit[i] = 0;
+			if (!mode || WORD(mode) != GAME_MODE_NORMAL ||
+			    moby < 0x00100000 || moby > 0x01ffff00 ||
+			    *(float*)(hero + 0x2e20) <= 0 || playerStateIsDead(WORD(hero + 0x25cc)))
+				continue;
+			if (WORD(hero + 0x25cc) == PLAYER_STATE_GET_HIT)
+				continue;
+			/* InitBodyState reads this transient collision index to apply damage. */
+			*(u8*)(moby + 0x2c) = 255;
+			((int (*)(u32, int, int, int, int))init)(hero, PLAYER_STATE_GET_HIT, 1, 0, 1);
+		}
+	}
+}
+
+/*
+ * NAME : captureHits
+ * DESCRIPTION : Retain each host-confirmed entry into the regular hit reaction.
+ * NOTES : Runs every update, before world packet throttling; health changes are not hit events.
+ * ARGS : Current clock and whether the host has a loaded mission.
+ * RETURN :
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+static void captureHits(u32 now, int ready)
+{
+	u32 heroes = ready ? GetAddressImmediate(&vaCoopPlayers) : 0;
+	int i, fresh = !hitEpoch || hitLevel != Level || hitMission != Mission->ActiveMission;
+	if (!heroes) {
+		hitEpoch = 0;
+		return;
+	}
+	if (fresh) {
+		hitEpoch = now | 1;
+		hitLevel = Level;
+		hitMission = Mission->ActiveMission;
+		hitSequence[0] = hitSequence[1] = 0;
+	}
+	for (i = 0; i < 2; ++i) {
+		u32 hero = WORD(heroes + i * 4);
+		int state;
+		if (hero < 0x00100000 || hero > 0x01ffd000 || WORD(hero + 0x2f10) != (u32)i)
+			continue;
+		state = WORD(hero + 0x25cc);
+		if (!fresh && state == PLAYER_STATE_GET_HIT && previousHitState[i] != state)
+			++hitSequence[i];
+		previousHitState[i] = state;
 	}
 }
 
@@ -271,9 +345,18 @@ int coopWorldUpdate(const moduleApi_t* loader, const onlineApi_t* online, int en
 		requestedLevel = 0;
 		requestedMission = -1;
 		pendingDeath[0] = pendingDeath[1] = 0;
+		pendingHit[0] = pendingHit[1] = 0;
+		hitEpoch = hitRole = 0;
 		return 0;
 	}
+	if (hitRole != role) {
+		hitRole = role;
+		hitEpoch = 0;
+		pendingHit[0] = pendingHit[1] = 0;
+	}
 	ready = coopWorldReady();
+	if (role == ONLINE_HOST)
+		captureHits(now, ready);
 	size = online->receive(WORLD_CHANNEL, &frame, sizeof(frame));
 	if (role == ONLINE_JOIN && size == sizeof(frame) && frame.magic == WORLD_MAGIC) {
 		hostSessionValid = (frame.flags & WORLD_READY) && (frame.level == 21 || frame.level == 22) &&
@@ -319,6 +402,9 @@ int coopWorldUpdate(const moduleApi_t* loader, const onlineApi_t* online, int en
 	frame.mission = ready ? (int)WORD(GetAddressImmediate(&vaMissionIndex)) : -1;
 	frame.missionLink = Mission->ActiveMission;
 	frame.flags = ready ? WORLD_READY : 0;
+	frame.hitEpoch = hitEpoch;
+	for (i = 0; i < 2; ++i)
+		frame.hitSequence[i] = hitSequence[i];
 	save = (int*)GetAddressImmediate(&vaCoopHeroSave);
 	frame.bolts = save ? save[0] : 0;
 	frame.xp = save ? save[2] : 0;

@@ -1080,7 +1080,7 @@ void moduleUpdate(void)
 	coopInput_t frame;
 	struct PAD* pad;
 	u32 original;
-	int i, j, size, local, role, ready, worldSent;
+	int i, j, size, local, role, ready;
 	u32 heroes, localHero, remoteHero;
 	dlResetBootIdle();
 	refreshHud(0);
@@ -1089,8 +1089,8 @@ void moduleUpdate(void)
 	coopConnectionUpdate(online);
 	coopPauseUpdate(loader, online);
 	coopBootUpdate();
-	worldSent = coopEncountersUpdate(loader, online, moduleExports.enabled);
-	worldSent |= coopWorldUpdate(loader, online, moduleExports.enabled);
+	coopEncountersUpdate(loader, online, moduleExports.enabled);
+	coopWorldUpdate(loader, online, moduleExports.enabled);
 	coopObjectsUpdate(loader, online, moduleExports.enabled, coopWorldReady(), 1);
 	if (!moduleExports.enabled || !supported()) {
 		moduleExports.state = !moduleExports.enabled ? COOP_OFF : COOP_UNSUPPORTED;
@@ -1173,7 +1173,7 @@ void moduleUpdate(void)
 			frame.sample[j] = moduleExports.sourceSample[j];
 	}
 	frame.objectBytes = coopObjectsWrite(frame.objects);
-	if (!worldSent && online->send(COOP_INPUT_CHANNEL, &frame, 0x44 + frame.objectBytes) == 0) {
+	if (online->send(COOP_INPUT_CHANNEL, &frame, 0x44 + frame.objectBytes) == 0) {
 		++moduleExports.sent;
 	}
 }
