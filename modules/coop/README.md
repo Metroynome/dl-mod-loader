@@ -143,6 +143,19 @@ spawn points. Position corrections preserve native movement history.
 
 ## Catacrom moby rewrite
 
+[MOBY-CHECKLIST.csv](MOBY-CHECKLIST.csv) lists known library moby classes and additional
+classes observed in the clean Catacrom co-op dump. Implemented means the replication
+adapter was implemented and tested; partial player/encounter support stays Not implemented.
+Unknown names, static scenery, legacy and multiplayer-only entries are retained for review;
+a Not implemented row does not establish that the object needs network updates.
+Rows are grouped by Category, then alphabetically by name. Categories are an initial
+classification from the known labels; Needs identification contains uncertain objects.
+The CSV stays one filterable table, with separate groups for enemies, breakables,
+vehicles, pickups, weapons, platforms, objectives and other object types.
+Verified naming corrections and unresolved visual labels are recorded in
+[MOBY-NAMES.md](notes/MOBY-NAMES.md). The library enums retain old names as aliases
+while the checklist uses the corrected names.
+
 This is a replacement backend, not a second system layered over the old snapshots.
 The first adapter supports Blade Balls only. Robot zombies, DZ strikers, pickups,
 vehicles and destructibles currently keep their native behavior and are not yet
