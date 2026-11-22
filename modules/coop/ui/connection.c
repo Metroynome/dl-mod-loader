@@ -1,5 +1,7 @@
 #include "connection.h"
 #include "numpad.h"
+#include "keyboard.h"
+#include <string.h>
 #include "modules/modmenu/include/modmenu.h"
 
 static int editorModal(u32 pressed);
@@ -17,6 +19,8 @@ static int profiles[8][5] = {
 	{0, 0, 0, 0, 25565}, {0, 0, 0, 0, 25565}, {0, 0, 0, 0, 25565}, {0, 0, 0, 0, 25565}
 };
 static int profileVersion;
+static int profileNames[8][24];
+static char profileName[24];
 static int editBackup[5], profileEditing;
 static const moduleConfigField_t settings[] = {
 	{"ip0", &ip[0], 0, 255},
@@ -77,6 +81,34 @@ static const moduleConfigField_t hostSettings[] = {
 };
 
 /*
+ * NAME : profileNameConfig
+ * DESCRIPTION : Load or save the optional name of one connection profile.
+ * NOTES : Character fields use the loader API without a Mod Menu dependency.
+ * ARGS : Slot and nonzero to save.
+ * RETURN : Loader configuration result.
+ * AUTHOR : Troy "Metroynome" Pruitt
+ */
+static int profileNameConfig(int slot, int save)
+{
+	moduleConfigField_t fields[24];
+	char keys[24][4];
+	char file[] = "coop-name0";
+	int i;
+	file[9] = '0' + slot;
+	for (i = 0; i < 24; ++i) {
+		keys[i][0] = 'c';
+		keys[i][1] = '0' + i / 10;
+		keys[i][2] = '0' + i % 10;
+		keys[i][3] = 0;
+		fields[i].key = keys[i];
+		fields[i].value = &profileNames[slot][i];
+		fields[i].minimum = 0;
+		fields[i].maximum = 126;
+	}
+	return save ? loader->saveConfig(file, fields, 24) : loader->loadConfig(file, fields, 24);
+}
+
+/*
  * NAME : addressValue
  * DESCRIPTION : Build the transport's four-byte IPv4 value.
  * NOTES :
@@ -120,6 +152,8 @@ static const char* valueLabel(void* context, int unused)
  */
 const char* coopConnectionValue(coopConnectionField_e which)
 {
+	if (which == COOP_CONNECTION_NAME)
+		return profileName;
 	return (u32)which <= COOP_CONNECTION_LOCAL_PORT ? valueLabel((void*)which, 0) : "";
 }
 
@@ -137,7 +171,20 @@ const char* coopConnectionProfileLabel(int slot)
 		return "";
 	if (!(profiles[slot][0] || profiles[slot][1] || profiles[slot][2] || profiles[slot][3]))
 		return "[EMPTY]";
-	return COOP_CONNECTION_DEFAULT_NAME;
+	{
+		static char name[16];
+		int i, start = 0;
+		if (!profileNames[slot][0])
+			return COOP_CONNECTION_DEFAULT_NAME;
+		while (start < 23 && profileNames[slot][start] == ' ')
+			++start;
+		if (!profileNames[slot][start])
+			return COOP_CONNECTION_DEFAULT_NAME;
+		for (i = 0; i < 15 && start + i < 23; ++i)
+			name[i] = profileNames[slot][start + i];
+		name[i] = 0;
+		return name;
+	}
 }
 
 /*
@@ -177,6 +224,17 @@ void coopConnectionProfileBegin(int slot)
 	editBackup[4] = hostPort;
 	profileEditing = 1;
 	coopConnectionProfileSelect(slot);
+	{
+		const char* name = coopConnectionProfileLabel(slot);
+		int i = 0;
+		if (!profileNames[slot][0])
+			name = COOP_CONNECTION_DEFAULT_NAME;
+		while (name[i] && i < 23) {
+			profileName[i] = name[i];
+			++i;
+		}
+		profileName[i] = 0;
+	}
 }
 
 /*
@@ -195,7 +253,9 @@ int coopConnectionProfileChanged(int slot)
 	for (i = 0; i < 4; ++i)
 		if (ip[i] != profiles[slot][i])
 			return 1;
-	return hostPort != profiles[slot][4];
+	if (hostPort != profiles[slot][4])
+		return 1;
+	return strcmp(profileName, profileNames[slot][0] ? coopConnectionProfileLabel(slot) : COOP_CONNECTION_DEFAULT_NAME) != 0;
 }
 
 /*
@@ -215,6 +275,8 @@ void coopConnectionProfileEnd(int slot, int save)
 		for (i = 0; i < 4; ++i)
 			profiles[slot][i] = ip[i];
 		profiles[slot][4] = hostPort;
+		for (i = 0; i < 24; ++i)
+			profileNames[slot][i] = profileName[i];
 	}
 	for (i = 0; i < 4; ++i)
 		ip[i] = editBackup[i];
@@ -240,6 +302,8 @@ void coopConnectionProfileDelete(int slot)
 	for (i = 0; i < 4; ++i)
 		profiles[slot][i] = 0;
 	profiles[slot][4] = 25565;
+	for (i = 0; i < 24; ++i)
+		profileNames[slot][i] = 0;
 	coopConnectionSave();
 }
 
@@ -275,10 +339,14 @@ int coopConnectionOpen(coopConnectionField_e which)
 {
 	char text[16];
 	coopNumpadKind_e kind = which == COOP_CONNECTION_ADDRESS ? COOP_NUMPAD_ADDRESS : COOP_NUMPAD_PORT;
-	if (field >= 0 || (u32)which > COOP_CONNECTION_LOCAL_PORT)
+	if (field >= 0 || (u32)which > COOP_CONNECTION_NAME)
 		return 0;
 	requestError = 0;
 	field = which;
+	if (which == COOP_CONNECTION_NAME) {
+		coopKeyboardOpen(profileName, 15);
+		return 1;
+	}
 	coopNumpadFormat(kind, which == COOP_CONNECTION_ADDRESS ? addressValue() :
 	    (u32)(which == COOP_CONNECTION_HOST_PORT ? hostPort : localPort), text);
 	coopNumpadOpen(kind, text, 1, 65535);
@@ -299,10 +367,19 @@ int coopConnectionInput(u32 pressed, u32 held)
 	int result, i;
 	if (field < 0)
 		return -1;
-	result = coopNumpadInput(pressed, held);
+	result = field == COOP_CONNECTION_NAME ? coopKeyboardInput(pressed, held) : coopNumpadInput(pressed, held);
 	if (result > 0) {
 		value = coopNumpadValue();
-		if (field == COOP_CONNECTION_ADDRESS) {
+		if (field == COOP_CONNECTION_NAME) {
+			const char* name = coopKeyboardText();
+			/* Reject empty, spaces-only and leading-space names without closing. */
+			if (!name[0] || name[0] == ' ')
+				return 0;
+			for (i = 0; i < 15 && name[i]; ++i)
+				profileName[i] = name[i];
+			for (; i < 24; ++i)
+				profileName[i] = 0;
+		} else if (field == COOP_CONNECTION_ADDRESS) {
 			for (i = 0; i < 4; ++i)
 				ip[i] = (value >> (i * 8)) & 255;
 		} else if (field == COOP_CONNECTION_HOST_PORT) {
@@ -326,7 +403,9 @@ int coopConnectionInput(u32 pressed, u32 held)
  */
 void coopConnectionDraw(void)
 {
-	if (field >= 0)
+	if (field == COOP_CONNECTION_NAME)
+		coopKeyboardDraw();
+	else if (field >= 0)
 		coopNumpadDraw();
 }
 
@@ -400,6 +479,16 @@ int coopConnectionLoad(void)
 		if (hostResult < DL_CONFIG_MISSING || hostResult == DL_CONFIG_OK)
 			result = hostResult;
 	}
+	if (result == DL_CONFIG_OK || result == DL_CONFIG_MISSING) {
+		int i;
+		for (i = 0; i < 8; ++i) {
+			int nameResult = profileNameConfig(i, 0);
+			if (nameResult < DL_CONFIG_MISSING) {
+				result = nameResult;
+				break;
+			}
+		}
+	}
 	configStatus = result == DL_CONFIG_OK ? 1 : result == DL_CONFIG_MISSING ? 3 : result == DL_CONFIG_INVALID ? 4 : 5;
 	return result;
 }
@@ -417,6 +506,14 @@ int coopConnectionSave(void)
 	int result = loader->saveConfig("coop-online", settings, sizeof(settings) / sizeof(settings[0]));
 	if (result == DL_CONFIG_OK)
 		result = loader->saveConfig("coop-host", hostSettings, sizeof(hostSettings) / sizeof(hostSettings[0]));
+	if (result == DL_CONFIG_OK) {
+		int i;
+		for (i = 0; i < 8; ++i) {
+			result = profileNameConfig(i, 1);
+			if (result != DL_CONFIG_OK)
+				break;
+		}
+	}
 	configStatus = result == DL_CONFIG_OK ? 2 : 5;
 	return result;
 }

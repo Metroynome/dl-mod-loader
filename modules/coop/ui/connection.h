@@ -9,7 +9,8 @@
 typedef enum coopConnectionField {
 	COOP_CONNECTION_ADDRESS,
 	COOP_CONNECTION_HOST_PORT,
-	COOP_CONNECTION_LOCAL_PORT
+	COOP_CONNECTION_LOCAL_PORT,
+	COOP_CONNECTION_NAME
 } coopConnectionField_e;
 
 /* Standalone callers own input capture, release-on-close and a safe UI render

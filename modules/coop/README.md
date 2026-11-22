@@ -13,17 +13,18 @@ normal New Game/Load Game menu is unchanged.
 
 - Split Screen opens the original Cooperative save menu and disables the online
   adapter, keeping the native two-player screen layout.
-- Host and Join each have four saved connection profiles. Filled entries currently
-  display "localhost"; empty slots show [EMPTY]. Select a filled entry to connect,
+- Host and Join each have four saved connection profiles. Filled entries show their
+  saved names (localhost by default); empty slots show [EMPTY]. Select a filled entry to connect,
   or an empty slot to create a profile. The editor has NAME, IP ADDRESS, PORT and
-  CREATE for new profiles or SAVE for existing ones. NAME is a placeholder
-  until a boot-compatible keyboard is added.
+  CREATE for new profiles or SAVE for existing ones. NAME opens the standalone keyboard.
 - EDIT and DELETE open a profiles-only list for choosing an entry. Square edits
   the highlighted profile directly; Circle deletes it. Triangle cancels an edit
   or returns from an action list. The footer shows the controller shortcuts.
   CREATE/SAVE writes the profile. Triangle warns before discarding unsaved changes.
   Host profiles use `coop-host.<region>.ini`; existing Host settings become the
   first Host profile. Join profiles remain in `coop-online.<region>.ini`.
+  Optional names (up to 15 characters) use `coop-name0` through `coop-name7`
+  regional INIs; existing unnamed profiles still display localhost.
 - Hosting shows connection progress and opens the listening port before opening
   New Game/Load Game. Backing out cancels hosting.
 - Joining first connects to the selected host.
@@ -37,7 +38,7 @@ normal New Game/Load Game menu is unchanged.
   times out during loading, the guest retries once its level is ready.
   Disconnect in the Online tab cancels a pending retry.
 
-The native menus, keypad input capture and rendering do not require Mod Menu.
+The native menus, keyboard/keypad input capture and rendering do not require Mod Menu.
 Existing native controller requirements still apply. The network prototype still
 supports NTSC-U Station/Catacrom only; these UI changes do not expand world sync
 or copy the host's entire save. Native autosave may write the guest's session.
@@ -223,3 +224,14 @@ development, build against the sibling checkout:
 ```sh
 docker run --rm -v "$PWD\:/src" -v "${PWD}/../librac4:/deps/librac4" -w /src dl-mod-loader make REGION=all LIBRAC4_DIR=/deps/librac4
 ```
+
+## Text keyboard
+
+Select NAME in a connection profile to open the QWERTY keyboard. It uses the
+numpad's colors, blinking cursor, sounds and input capture. D-pad or left stick
+moves between keys, with the same delayed repeat. X inserts a character, Square
+deletes, Circle inserts a space, L1/R1 moves the text cursor, L2 toggles case, and Start/R2 accepts.
+Triangle cancels the text draft. Shift and Symbols are also selectable keys;
+Space, Delete and Done occupy the bottom row. Right stick moves the panel within
+the screen borders. Accepting a name updates the profile draft; CREATE/SAVE writes
+it to disk. Names cannot be empty or begin with a space. The callable keyboard lives in `ui/keyboard.h` and needs no Mod Menu.

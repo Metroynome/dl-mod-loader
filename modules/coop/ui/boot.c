@@ -2,6 +2,7 @@
 #include "boot-addresses.h"
 #include "connection.h"
 #include "numpad.h"
+#include "keyboard.h"
 #include "sound.h"
 #include "../world.h"
 #include <librac4/game.h>
@@ -72,6 +73,7 @@ static void drawProfileHelp(void);
 static int profileSlot(void);
 static u32 profileHeld(void);
 static void editAddress(void* unused);
+static void editField(coopConnectionField_e which);
 static void editPort(void* unused);
 static void confirmJoin(void* unused);
 static void beginConnection(int command);
@@ -110,7 +112,7 @@ static u32 multiplayerTrampoline[4] __attribute__((aligned(16)));
 static int pendingBootAction;
 static u32 singleplayerAddress, singleplayerWords[2];
 static u32 singleplayerTrampoline[4] __attribute__((aligned(16)));
-static char addressLabel[40], portLabel[32];
+static char addressLabel[40], portLabel[32], nameLabel[32];
 static char endpointLabels[4][32];
 static int selectedEndpoint, profileRole = ONLINE_JOIN;
 static profileAction_e profileAction;
@@ -133,7 +135,7 @@ static bootButton_t savedButtons[] = {
 	{1, "DELETE", deleteEndpoint}
 };
 static bootButton_t joinButtons[] = {
-	{1, "NAME: " COOP_CONNECTION_DEFAULT_NAME, editName},
+	{1, nameLabel, editName},
 	{1, addressLabel, editAddress},
 	{1, portLabel, editPort},
 	{1, "CREATE", saveEndpoint}
@@ -455,8 +457,8 @@ static void leaveProfiles(void* unused)
 
 /*
  * NAME : editName
- * DESCRIPTION : Reserve the selectable Name field for a future boot keyboard.
- * NOTES : The multiplayer profile keyboard is not present in the boot overlay.
+ * DESCRIPTION : Edit the selected profile name with the standalone keyboard.
+ * NOTES : Uses the same native input capture as the numeric fields.
  * ARGS : Unused native callback context.
  * RETURN :
  * AUTHOR : Troy "Metroynome" Pruitt
@@ -464,6 +466,7 @@ static void leaveProfiles(void* unused)
 static void editName(void* unused)
 {
 	(void)unused;
+	editField(COOP_CONNECTION_NAME);
 }
 
 /*
@@ -617,6 +620,7 @@ static void showEndpoint(void* unused)
 {
 	(void)unused;
 	page = BOOT_EDIT;
+	fieldLabel(nameLabel, "NAME: ", COOP_CONNECTION_NAME);
 	fieldLabel(addressLabel, "IP ADDRESS: ", COOP_CONNECTION_ADDRESS);
 	fieldLabel(portLabel, "PORT: ", COOP_CONNECTION_HOST_PORT);
 	nativeMenu(joinButtons, 4, cancelEndpoint);
@@ -810,7 +814,7 @@ static void editField(coopConnectionField_e which)
 	originalPad = (bootRawCallback_t)pad->RawPadInputCallback;
 	memcpy(sample, pad->rdata, sizeof(sample));
 	previousButtons = (~(sample[2] | (sample[3] << 8))) & 0xffff;
-	editing = 1;
+	editing = which == COOP_CONNECTION_NAME ? 2 : 1;
 	pad->RawPadInputCallback = capturePad;
 }
 
@@ -1225,9 +1229,9 @@ static void submitFrame(void)
 	if (editing) {
 		u32 pressed = held & ~previousButtons;
 		previousButtons = held;
-		coopNumpadMove((sample[1] & 0xf0) == 0x70 ? sample[4] : 127,
+		(editing == 2 ? coopKeyboardMove : coopNumpadMove)((sample[1] & 0xf0) == 0x70 ? sample[4] : 127,
 		    (sample[1] & 0xf0) == 0x70 ? sample[5] : 127);
-		coopNumpadNavigate((sample[1] & 0xf0) == 0x70 ? sample[6] : 127,
+		(editing == 2 ? coopKeyboardNavigate : coopNumpadNavigate)((sample[1] & 0xf0) == 0x70 ? sample[6] : 127,
 		    (sample[1] & 0xf0) == 0x70 ? sample[7] : 127);
 		if (coopConnectionInput(pressed, held)) {
 			editing = 0;
