@@ -379,5 +379,7 @@ objectives, HUD and gameplay. Enter Local Play was tested through PINE with
 automatic boot off, preserving that saved setting. Those live checks preceded
 this command renumbering; Forge v2's client should use the command IDs above.
 
-Campaign, online, PAL, NTSC-J and split-screen hopping remain unsupported.
+Command 8 campaign/Cooperative travel builds for NTSC-U, PAL, NTSC-J and NTSC-K;
+only NTSC-U Cooperative travel has been live-tested. Multiplayer commands remain
+NTSC-U only. Online and multiplayer split-screen hopping remain unsupported.
 See [Forge support notes](README.md#support-and-limitations).

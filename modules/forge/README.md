@@ -4,8 +4,8 @@ NTSC-U online handoff was tested through Horizon patch loading/menu use, logout
 to Local Play, and PINE Hoven Gorge selection, Start Game and reload. The offline
 modules deactivate online; their map commands become available again after logout.
 
-Forge provides Local Play map-testing controls and campaign/Cooperative planet
-and mission travel for NTSC-U Deadlocked. It uses Map
+Forge provides NTSC-U Local Play map-testing controls and campaign/Cooperative
+planet and mission travel builds for NTSC-U, PAL, NTSC-J and NTSC-K. It uses Map
 Loader to reload or change maps without leaving the current game. No changes
 to Horizon Forge v2 are included; its developer can integrate the documented
 [PINE command interface](PINE.md).
@@ -176,8 +176,11 @@ the saved boot option off. Forge v2's integration remains editor-side work.
 ## Support and limitations
 
 - NTSC-U Deadlocked Local Play staging and the retail bases listed in [PINE.md](PINE.md).
-- Campaign/Cooperative planet and mission travel supports NTSC-U. Online,
-  PAL, NTSC-J, and multiplayer split-screen hopping remain unsupported.
+- Campaign/Cooperative planet and mission travel builds for NTSC-U, PAL, NTSC-J
+  and NTSC-K. Only NTSC-U Cooperative travel has been live-tested.
+- Multiplayer remains NTSC-U only. PAL multiplayer needs a regional libdl,
+  Map Loader and Forge hook port; it is excluded from the PAL build until then.
+  Online and multiplayer split-screen hopping remain unsupported.
 - No automatic file watching, build-triggered reload, or position restoration.
 - Finish writing map files before scanning or loading. A failure after teardown
   may require restarting the game.

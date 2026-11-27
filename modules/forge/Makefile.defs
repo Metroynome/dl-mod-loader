@@ -1,7 +1,7 @@
 # Module settings; comment out a mode include to omit that backend.
-LIBRARY = libdl
-MODE = both
-REGIONS = ntscu
+LIBRARY = none
+MODE = campaign
+REGIONS = ntscu pal ntscj ntsck
 EE_OBJS = main.o
 include $(MODULE)/multiplayer/Makefile.defs
 include $(MODULE)/singleplayer/Makefile.defs
