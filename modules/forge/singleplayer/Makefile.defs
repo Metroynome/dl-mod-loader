@@ -1,0 +1,2 @@
+EE_OBJS += singleplayer/travel.o
+EE_CFLAGS += -DFORGE_SINGLEPLAYER

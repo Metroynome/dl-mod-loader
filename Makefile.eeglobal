@@ -137,6 +137,26 @@ $(OBJDIR)/%.o: $(SOURCE_DIR)/%.S $(LIB_ARCHIVE) Makefile.eeglobal $(wildcard $(M
 	$(EE_CC) $(EE_CFLAGS) $(EE_INCS) -c $< -o $@
 -include $(OBJECTS:.o=.d)
 
+# A mixed-mode module can use campaign addresses without colliding with libdl symbols.
+ifneq ($(RAC4_NAMESPACE),)
+RAC4_WORK := $(WORK)/libraries/$(RAC4_NAMESPACE)librac4
+RAC4_ARCHIVE := $(RAC4_WORK)/lib/$(RAC4_NAMESPACE)librac4$(REGION).a
+$(RAC4_ARCHIVE): Makefile.eeglobal $(wildcard $(LIBRAC4_DIR)/src/* $(LIBRAC4_DIR)/include/* $(LIBRAC4_DIR)/Makefile.*)
+	mkdir -p $(RAC4_WORK) $(WORK)/include/librac4
+	cp -R $(LIBRAC4_DIR)/include/. $(WORK)/include/librac4/
+	(cd $(LIBRAC4_DIR) && tar --exclude=.git --exclude=obj --exclude=lib --exclude=test -cf - .) | (cd $(RAC4_WORK) && tar -xf -)
+	$(MAKE) -C $(RAC4_WORK) -f Makefile.$(REGION) clean
+	$(MAKE) -C $(RAC4_WORK) -f Makefile.$(REGION) EE_PREFIX=$(EE_PREFIX)
+	mkdir -p $(RAC4_WORK)/namespaced
+	rm -f $(RAC4_WORK)/namespaced/*.o $(RAC4_WORK)/lib/namespaced.a
+	(cd $(RAC4_WORK)/namespaced && $(EE_PREFIX)ar x ../lib/librac4$(REGION).a && \
+	  for object in *.o; do mv "$$object" "$${object%.o}.$(RAC4_NAMESPACE).o"; done && \
+	  $(EE_PREFIX)ar rcs ../lib/namespaced.a *.$(RAC4_NAMESPACE).o)
+	$(EE_OBJCOPY) --prefix-symbols=$(RAC4_NAMESPACE) $(RAC4_WORK)/lib/namespaced.a $@
+$(OBJECTS): $(RAC4_ARCHIVE)
+EE_LIBS += $(RAC4_ARCHIVE)
+endif
+
 # Relink so each invocation packages the current image and relocation metadata.
 .PHONY: image FORCE
 $(ELF): $(OBJECTS) $(LIB_ARCHIVE) $(LIB_LINK_ARCHIVE) $(LINKFILE) FORCE
@@ -160,7 +180,7 @@ build/relocate: tools/relocate.c include/module.h include/types.h
 	$(HOST_CC) -std=c99 -Wall -Wextra $< -o $@
 image: $(ELF) build/relocate
 	awk -f tools/sections.awk $(OBJDIR)/$(IMAGE).map src/module.ld > $(OBJDIR)/live.ld
-	$(EE_CC) $(filter-out -Wl$(comma)-T$(comma)$(LINKFILE) -Wl$(comma)--gc-sections,$(EE_LDFLAGS)) -Wl,--emit-relocs,-T,$(OBJDIR)/live.ld -o $(OBJDIR)/reloc.elf $(OBJECTS) $(LIB_LINK_ARCHIVE) -lgcc
+	$(EE_CC) $(filter-out -Wl$(comma)-T$(comma)$(LINKFILE) -Wl$(comma)--gc-sections,$(EE_LDFLAGS)) -Wl,--emit-relocs,-T,$(OBJDIR)/live.ld -o $(OBJDIR)/reloc.elf $(OBJECTS) $(LIB_LINK_ARCHIVE) $(EE_LIBS) -lgcc
 	@set -eu; end=$$($(EE_NM) $(ELF) | awk '$$3=="_image_end" {print "0x"$$1}'); \
 	  $(EE_OBJCOPY) -O binary --pad-to="$$end" $(ELF) $(OBJDIR)/flat.bin; \
 	  $(EE_OBJCOPY) -O binary --pad-to="$$end" $(OBJDIR)/reloc.elf $(OBJDIR)/reloc.bin

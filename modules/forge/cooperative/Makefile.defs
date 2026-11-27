@@ -1,0 +1,2 @@
+EE_OBJS += cooperative/travel.o
+EE_CFLAGS += -DFORGE_COOPERATIVE

@@ -4,18 +4,44 @@ NTSC-U online handoff was tested through Horizon patch loading/menu use, logout
 to Local Play, and PINE Hoven Gorge selection, Start Game and reload. The offline
 modules deactivate online; their map commands become available again after logout.
 
-Forge currently provides Local Play map-testing controls for NTSC-U Deadlocked. It uses Map
+Forge provides Local Play map-testing controls and campaign/Cooperative planet
+and mission travel for NTSC-U Deadlocked. It uses Map
 Loader to reload or change maps without leaving the current game. No changes
 to Horizon Forge v2 are included; its developer can integrate the documented
 [PINE command interface](PINE.md).
 
 ## Setup and use
 
+Loaded campaign and Cooperative games have a Forge tab with Planet, Mission,
+Jump to Planet / Mission, and Reload Current Mission. Scroll the planet selector;
+press X on Mission to choose from that planet's named missions. Selection alone
+does not load anything. Use Jump to load the selection. The native LevelBox catalog
+was checked against the NTSC-U retail mission records and text.
+
+The current mode is preserved: campaign stays campaign, Cooperative stays
+Cooperative, and multiplayer/custom-map controls remain multiplayer-only. PINE
+command 8 provides the same travel without Mod Menu for recording moby classes.
+Travel requires a stable loaded mission in gameplay or pause; loading, movies,
+vendors and other native menus reject new requests. Native autosave behavior is
+unchanged, but Forge does not request a save when starting the transition.
+
+Source folders separate `multiplayer/`, `singleplayer/` and `cooperative/` behavior.
+`shared/` owns the mailbox, catalog and common travel state. The root entry point
+coordinates both backends. Campaign library symbols are isolated from libdl so
+the two backends cannot accidentally resolve the other's native wrappers.
+
+Each source folder has a `Makefile.defs` using `EE_OBJS +=`. In Forge's root
+`Makefile.defs`, comment out the `singleplayer/`, `cooperative/`, or `multiplayer/`
+include to omit that mode. Keep the `shared/` include last; it includes the mission
+catalog and campaign library only when Single Player or Cooperative is included.
+All three modes are enabled by default. Clean Forge before rebuilding after
+changing these includes so objects are compiled with the selected mode defines.
+
 Forge and its dependencies are enabled in the NTSC-U release. For a custom
 module list, use:
 
 ```text
-modmenu local
+modmenu campaign,local
 maploader local
 forge campaign,local
 ```
@@ -135,6 +161,7 @@ The module-owned mailbox accepts:
 | Select/load retail | Select or hop to a supported retail base |
 | Start Game | Start from staging with current map/settings |
 | Reload current | Reload the active retail/custom map |
+| Travel | Load a campaign/Cooperative planet and mission while preserving the current mode |
 
 To start a newly selected map, wait for selection to complete, then send Start
 Game with a new request ID. Accepted work is not necessarily finished: always
@@ -149,7 +176,8 @@ the saved boot option off. Forge v2's integration remains editor-side work.
 ## Support and limitations
 
 - NTSC-U Deadlocked Local Play staging and the retail bases listed in [PINE.md](PINE.md).
-- No campaign, online, PAL, NTSC-J, or split-screen hopping support yet.
+- Campaign/Cooperative planet and mission travel supports NTSC-U. Online,
+  PAL, NTSC-J, and multiplayer split-screen hopping remain unsupported.
 - No automatic file watching, build-triggered reload, or position restoration.
 - Finish writing map files before scanning or loading. A failure after teardown
   may require restarting the game.
@@ -160,6 +188,10 @@ Live NTSC-U tests covered Hoven Gorge and Metropolis, retail Battledome Tower
 and Catacrom Graveyard, repeated reloads, and returning to staging. Gameplay,
 HUD, minimaps, loading-screen names/backgrounds, and the reload shortcut were
 checked. Other maps and player counts still need individual verification.
+
+Live Cooperative PINE testing completed a Sarathos mission change and travel to
+Catacrom. Both retained Cooperative mode and reported successful completion.
+Campaign travel and the new travel menu still need live verification.
 
 ## Ownership
 
@@ -195,5 +227,5 @@ not a proposed replacement protocol.
 
 Map filename stems now accept up to 128 ASCII characters (plus the NUL terminator).
 Update Forge, Map Loader, and `mods/utils/mapscan.irx` together, then cold-boot.
-External clients must use [PINE protocol v4](PINE.md); earlier field offsets are incompatible. The mailbox no longer contains version/size
+External clients must use [PINE protocol v5](PINE.md); earlier field offsets are incompatible. The mailbox no longer contains version/size
 fields, and accepts an optional game-mode byte (CQ by default).

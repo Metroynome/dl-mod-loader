@@ -1,16 +1,23 @@
 /* PINE only writes data; commands execute here on the normal module tick. */
 #include "modules/forge/include/forge.h"
+#include "travel.h"
 
+#ifdef FORGE_MULTIPLAYER
 int forgeBootAvailable(void);
 int forgeBootRequest(void);
 u32 forgeBootState(void);
+#else
+#define forgeBootAvailable() (0)
+#define forgeBootRequest() (FORGE_ERROR_CONTEXT)
+#define forgeBootState() (FORGE_FAILED)
+#endif
 
 /* Part of Forge's BSS and module memory size, not a loader reservation.
  * PINE follows the module discovery header and exports table; see PINE.md. */
 volatile forgeMailbox_t forgeMailbox __attribute__((aligned(16)));
 const forgeExports_t moduleExports DL_MODULE_EXPORTS = {FORGE_EXPORTS_MAGIC, 1, sizeof(forgeExports_t), &forgeMailbox};
 static u32 lastRequestId, activeRequestId;
-static int bootRequest;
+static int bootRequest, travelRequest;
 static const u8 stagingCommands = (1 << FORGE_REFRESH) | (1 << FORGE_SELECT) |
 	                             (1 << FORGE_REFRESH_SELECT) | (1 << FORGE_SELECT_RETAIL) |
 	                             (1 << FORGE_START_GAME);
@@ -29,6 +36,7 @@ void forgeBridgeDisable(void)
 		mailbox->completedId = activeRequestId;
 		activeRequestId = 0;
 		bootRequest = 0;
+		travelRequest = 0;
 	}
 	lastRequestId = mailbox->requestId;
 	mailbox->gameMode = FORGE_MODE_CQ;
@@ -42,6 +50,7 @@ void forgeBridgeInit(void)
 		((volatile u32*)mailbox)[i] = 0;
 	lastRequestId = activeRequestId = 0;
 	bootRequest = 0;
+	travelRequest = 0;
 	mailbox->magic = FORGE_MAILBOX_MAGIC;
 }
 
@@ -50,20 +59,26 @@ void forgeBridgeTick(const mapHopApi_t* hopApi)
 	volatile forgeMailbox_t* mailbox = FORGE_MAILBOX;
 	u32 id, command, i;
 	u8 gameMode;
+	u8 planet, mission;
 	char name[FORGE_FILENAME_SIZE];
 	int error;
 	int bootAvailable = forgeBootAvailable();
+	u32 travel = forgeTravelContext();
 	++mailbox->heartbeat;
-	mailbox->available = bootAvailable || hopApi != 0;
+	mailbox->available = bootAvailable || hopApi != 0 || forgeTravelAvailable();
 	mailbox->context = bootAvailable ? FORGE_CONTEXT_BOOT :
-	                   hopApi ? hopApi->context() : FORGE_CONTEXT_UNAVAILABLE;
+	                   travel ? travel : hopApi ? hopApi->context() : FORGE_CONTEXT_UNAVAILABLE;
 	mailbox->capabilities = mailbox->context == FORGE_CONTEXT_STAGING ? stagingCommands :
 	                  mailbox->context == FORGE_CONTEXT_GAME ? gameCommands :
-	                  mailbox->context == FORGE_CONTEXT_BOOT ? (1 << FORGE_LOCAL_PLAY) : 0;
+	                  mailbox->context == FORGE_CONTEXT_BOOT ? (1 << FORGE_LOCAL_PLAY) :
+	                  travel && forgeTravelAvailable() ? (1 << FORGE_TRAVEL) : 0;
 	if (activeRequestId) {
 		if (bootRequest) {
 			mailbox->state = forgeBootState();
 			mailbox->error = mailbox->state == FORGE_FAILED ? FORGE_ERROR_LOAD : 0;
+		} else if (travelRequest) {
+			mailbox->state = forgeTravelState();
+			mailbox->error = forgeTravelError();
 		} else {
 			mailbox->state = hopApi ? hopApi->state() : FORGE_FAILED;
 			mailbox->error = hopApi ? hopApi->error() : FORGE_ERROR_INACTIVE;
@@ -72,6 +87,7 @@ void forgeBridgeTick(const mapHopApi_t* hopApi)
 			mailbox->completedId = activeRequestId;
 			activeRequestId = 0;
 			bootRequest = 0;
+			travelRequest = 0;
 		}
 	}
 	id = mailbox->requestId;
@@ -79,6 +95,8 @@ void forgeBridgeTick(const mapHopApi_t* hopApi)
 		return;
 	command = mailbox->command;
 	gameMode = mailbox->gameMode;
+	planet = mailbox->planet;
+	mission = mailbox->mission;
 	for (i = 0; i < sizeof(name); ++i)
 		name[i] = mailbox->filename[i];
 	if (id != mailbox->requestId)
@@ -98,6 +116,8 @@ void forgeBridgeTick(const mapHopApi_t* hopApi)
 		error = FORGE_ERROR_BUSY;
 	else if (command == FORGE_LOCAL_PLAY)
 		error = forgeBootRequest();
+	else if (command == FORGE_TRAVEL)
+		error = forgeTravelRequest(planet, mission);
 	else if (!hopApi)
 		error = FORGE_ERROR_INACTIVE;
 	else
@@ -110,11 +130,13 @@ void forgeBridgeTick(const mapHopApi_t* hopApi)
 	mailbox->acceptedId = id;
 	activeRequestId = id;
 	bootRequest = command == FORGE_LOCAL_PLAY;
-	mailbox->state = bootRequest ? forgeBootState() : hopApi->state();
+	travelRequest = command == FORGE_TRAVEL;
+	mailbox->state = bootRequest ? forgeBootState() : travelRequest ? forgeTravelState() : hopApi->state();
 	mailbox->error = 0;
 	if (mailbox->state == FORGE_COMPLETE || mailbox->state == FORGE_FAILED) {
 		mailbox->completedId = id;
 		activeRequestId = 0;
 		bootRequest = 0;
+		travelRequest = 0;
 	}
 }

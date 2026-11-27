@@ -12,9 +12,13 @@ NR == FNR {
         file=$3; size=$2
     } else next
     if (size !~ /^0x0+$/ && file ~ /\.o\)?$/) {
-        # A leading wildcard matches archive members as well as object paths.
-        sub(/^.*\(/,"",file); sub(/\)$/, "",file); sub(/^.*\//,"",file)
-        live[group]=live[group] " *" file "(" section ")"
+        # Keep object paths distinct when mode folders reuse filenames.
+        # Archive members also need their archive identity across libraries.
+        if (file ~ /\(/) {
+            sub(/^.*\(/, "", file); sub(/\)$/, "", file)
+            file="*" file
+        }
+        live[group]=live[group] " " file "(" section ")"
     }
     section=""
     next

@@ -10,7 +10,7 @@
 
 /* Module-owned little-endian EE mailbox. Only request fields belong to the host.
  * Write command/name/optional gameMode first, requestId last. One request at a time. */
-#define FORGE_MAILBOX_MAGIC   (0x34475246)
+#define FORGE_MAILBOX_MAGIC   (0x35475246)
 #define FORGE_FILENAME_SIZE   (129)
 
 #ifndef FORGE_MAILBOX
@@ -25,14 +25,17 @@ typedef enum forgeCommand {
 	FORGE_REFRESH_SELECT = 4,
 	FORGE_SELECT_RETAIL = 5,
 	FORGE_START_GAME = 6,
-	FORGE_RELOAD = 7
+	FORGE_RELOAD = 7,
+	FORGE_TRAVEL = 8
 } forgeCommand_e;
 
 typedef enum forgeContext {
 	FORGE_CONTEXT_UNAVAILABLE = 0,
 	FORGE_CONTEXT_STAGING = 1,
 	FORGE_CONTEXT_GAME = 2,
-	FORGE_CONTEXT_BOOT = 3
+	FORGE_CONTEXT_BOOT = 3,
+	FORGE_CONTEXT_CAMPAIGN = 4,
+	FORGE_CONTEXT_COOPERATIVE = 5
 } forgeContext_e;
 
 /* Native libdl GameRuleIds. Zero also means the optional host byte was omitted. */
@@ -61,7 +64,9 @@ typedef enum forgeError {
 	FORGE_ERROR_SCAN = 6,
 	FORGE_ERROR_LOAD = 7,
 	FORGE_ERROR_INACTIVE = 8,
-	FORGE_ERROR_MODE = 9
+	FORGE_ERROR_MODE = 9,
+	FORGE_ERROR_PLANET = 10,
+	FORGE_ERROR_MISSION = 11
 } forgeError_e;
 
 /* Forge owns the capability; inactive modules must return false. */
@@ -100,11 +105,11 @@ typedef struct forgeMailbox {
 	/* 0x10 */ u32 rejectedId;
 	/* 0x14 */ u8 available;
 	/* 0x15 */ u8 context;
-	/* 0x16 */ u8 capabilities;
-	/* 0x17 */ u8 state;
-	/* 0x18 */ u8 error;
-	/* 0x19 */ u8 rejectError;
-	/* 0x1a..0x1b: alignment padding before the 32-bit request ID. */
+	/* 0x16 */ u16 capabilities;
+	/* 0x18 */ u8 state;
+	/* 0x19 */ u8 error;
+	/* 0x1a */ u8 rejectError;
+	/* 0x1b */ u8 reserved;
 
 	/* Host request. Write the payload first and requestId last. */
 	/* 0x1c */ u32 requestId;
@@ -112,6 +117,9 @@ typedef struct forgeMailbox {
 	/* 0x21 */ u8 gameMode; /* GameRuleIds; reset to CQ after consumption. */
 	/* 0x22 */ char filename[FORGE_FILENAME_SIZE];
 	/* 0xa3 */ u8 padding[1];
+	/* 0xa4 */ u8 planet; /* Unprefixed campaign planet ID, even in co-op. */
+	/* 0xa5 */ u8 mission; /* Relative mission index on that planet. */
+	/* 0xa6 */ u8 travelPadding[2];
 } forgeMailbox_t;
 
 /* Offsets are for 32-bit EE pointers. Export discovery remains version 1. */
@@ -122,7 +130,7 @@ typedef struct forgeExports {
 	/* 0x0c */ volatile forgeMailbox_t* mailbox;
 } forgeExports_t;
 
-typedef char forgeMailboxSize[(sizeof(forgeMailbox_t) == 164) ? 1 : -1];
+typedef char forgeMailboxSize[(sizeof(forgeMailbox_t) == 168) ? 1 : -1];
 
 extern volatile forgeMailbox_t forgeMailbox;
 #endif

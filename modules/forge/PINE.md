@@ -1,6 +1,6 @@
-# Forge PINE interface v4
+# Forge PINE interface v5
 
-Forge owns a **164-byte, 16-byte-aligned mailbox in its module BSS**.
+Forge owns a **168-byte, 16-byte-aligned mailbox in its module BSS**.
 There is no fixed mailbox address or loader-owned reservation.
 Use PINE EE memory reads/writes; this is not a host-process pointer. Forge v2
 needs no plugin-specific transport. The Forge mod consumes commands on its
@@ -9,8 +9,10 @@ normal game-thread update. No editor source changes are included here.
 Enable `forge campaign,local`, `maploader local`, and optionally `modmenu` in modules.txt.
 The protocol works without Mod Menu. Currently supported: NTSC-U Deadlocked Local Play
 staging and the retail base IDs listed below. Command 1 can enter Local Play
-from the boot intro/preview or boot menu. Online, loaded campaign levels and transitions do not accept
-new commands; map commands also require staging or a running Local Play game.
+from the boot intro/preview or boot menu. Command 8 travels between loaded campaign
+or Cooperative planets/missions while preserving the current mode. Online and
+transitions do not accept travel commands; multiplayer commands still require
+staging or a running Local Play game.
 
 ## Quick guide: send a command
 
@@ -25,7 +27,7 @@ Every command uses this same procedure:
    at `M + 0x14` and the expected context at `M + 0x15`: `1` for staging,
    `2` for a running game, `3` for the boot menu. Wait for any previous command or menu-triggered
    scan/load to finish. Do not send during a transition.
-2. Check the one-byte capabilities field at `M + 0x16`:
+2. Check the two-byte little-endian capabilities field at `M + 0x16`:
    `(capabilities & (1 << command)) != 0` must be true.
 3. Write the command number as **one byte** to `M + 0x20`.
 4. Write a **129-byte, zero-filled ASCII buffer** to `M + 0x22`, containing
@@ -36,9 +38,9 @@ Every command uses this same procedure:
    This submits the request. Do not write any game-owned fields or overwrite
    the whole mailbox.
 6. Poll for this exact `id`. If `rejectedId` at `M + 0x10` matches, stop and
-   report `rejectError` at `M + 0x19`. Otherwise wait for `completedId` at
-   `M + 0x0c` to match. Success requires `state == 3` at `M + 0x17` and
-   `error == 0` at `M + 0x18`. State `4` means failure; report `error`.
+   report `rejectError` at `M + 0x1a`. Otherwise wait for `completedId` at
+   `M + 0x0c` to match. Success requires `state == 3` at `M + 0x18` and
+   `error == 0` at `M + 0x19`. State `4` means failure; report `error`.
    `acceptedId == id` only means accepted, **not finished**.
 
 Use one command at a time. Do not reset IDs to zero between commands. After
@@ -169,7 +171,7 @@ No memory scan is needed. All pointers are 32-bit little-endian EE addresses.
    `1` at +`0x04`, size `16` at +`0x08`, and the mailbox pointer at
    +`0x0c`. The C declaration is `forgeExports_t` in `modules/forge/include/forge.h`.
 5. Require a 16-byte-aligned mailbox entirely within Forge's address/size range.
-   Check mailbox magic `0x34475246` (`FRG4`) and the full 164-byte range.
+   Check mailbox magic `0x35475246` (`FRG5`) and the full 168-byte range.
    The mailbox has no version or size fields.
    Re-read discovery pointers and the table entry to detect a restart during
    discovery. Verify heartbeat at mailbox + `0x04` advances, then check
@@ -186,29 +188,33 @@ savestate load, module replacement, changed header, or stopped heartbeat.
 
 Deploy Forge and Map Loader together and cold-boot. Loader/module/exports
 discovery headers use version 1; Forge/Map Loader service ABI is 3.
-The mailbox is 164 bytes, including space for 128 filename characters plus NUL.
+The mailbox is 168 bytes, including space for 128 filename characters plus NUL.
+Version 5 changes the capability width and state/error offsets; do not reuse v4 offsets.
 
 | Offset | Bytes | Field | Owner / meaning |
 | --- | --- | --- | --- |
-| 0x00 | 4 | magic | Game: `0x34475246` (`FRG4`) |
+| 0x00 | 4 | magic | Game: `0x35475246` (`FRG5`) |
 | 0x04 | 4 | heartbeat | Game: advances on Forge updates |
 | 0x08 | 4 | acceptedId | Game: most recently accepted request |
 | 0x0c | 4 | completedId | Game: most recently completed request |
 | 0x10 | 4 | rejectedId | Game: most recently rejected request |
 | 0x14 | 1 | available | Game: Map Loader or boot command backend available |
-| 0x15 | 1 | context | Game: 0 unavailable, 1 staging, 2 game, 3 boot menu |
-| 0x16 | 1 | capabilities | Game: bit `(1 << command)` |
-| 0x17 | 1 | state | Game: accepted operation state |
-| 0x18 | 1 | error | Game: accepted operation error |
-| 0x19 | 1 | rejectError | Game: rejected operation error |
-| 0x1a | 2 | alignment padding | Do not write |
+| 0x15 | 1 | context | Game: 0 unavailable, 1 staging, 2 game, 3 boot, 4 campaign, 5 Cooperative |
+| 0x16 | 2 | capabilities | Game: little-endian bit `(1 << command)` |
+| 0x18 | 1 | state | Game: accepted operation state |
+| 0x19 | 1 | error | Game: accepted operation error |
+| 0x1a | 1 | rejectError | Game: rejected operation error |
+| 0x1b | 1 | reserved | Do not write |
 | 0x1c | 4 | requestId | **Host: write LAST**, nonzero |
 | 0x20 | 1 | command | Host: command number |
 | 0x21 | 1 | gameMode | Host: optional native mode ID; reset to CQ when consumed |
 | 0x22 | 129 | filename | Host: up to 128 ASCII characters plus NUL |
 | 0xa3 | 1 | padding | Zero; do not write |
+| 0xa4 | 1 | planet | Host: unprefixed planet ID for command 8 |
+| 0xa5 | 1 | mission | Host: relative mission index for command 8 |
+| 0xa6 | 2 | travelPadding | Do not write |
 
-All host-editable fields are grouped at `0x1c` through `0xa2`. Command, gameMode
+All host-editable fields are grouped at `0x1c` through `0xa5`. Command, gameMode
 and filename form one contiguous 131-byte payload starting at `0x20`. You may
 write that payload together, or write each field separately using its listed
 width. Complete those writes before writing the aligned request ID at `0x1c`
@@ -272,7 +278,7 @@ callback runs on the next update so Mod Menu can close first. Completion means
 that gameplay is ready. Leaving staging before execution cancels the request;
 it cannot start online games. Game-mode changes use the native presets above.
 
-Capabilities: boot menu `0x02`, staging `0x7c`, in game `0xbc`.
+Capabilities: boot menu `0x02`, staging `0x7c`, in game `0xbc`, stable campaign/Cooperative `0x0100`.
 Always check `(capabilities & (1 << command)) != 0` before submitting.
 
 Command 5 (`FORGE_SELECT_RETAIL`) uses the filename field as a NUL-terminated
@@ -304,6 +310,39 @@ when present; removed maps lose selection. In-game refresh requires mapscan.
 Refresh only updates the catalog: use command 7 or 4 to load changed content.
 
 ## Submission and completion
+
+### Campaign / Cooperative travel (command 8)
+
+Load a save once. Require context 4 (campaign) or 5 (Cooperative), available=1,
+and capability 0x0100. Write command 8 at `M + 0x20`, the unprefixed planet ID
+at `M + 0xa4`, and the relative mission index at `M + 0xa5`. Write requestId
+at `M + 0x1c` last, then wait for completion using the v5 offsets above.
+Filename and gameMode are ignored for this command.
+
+| Planet ID | Planet | Mission indices |
+| --- | --- | --- |
+| 1 | DreadZone Station | 0–44 |
+| 2 | Catacrom Four | 0–6 |
+| 4 | Sarathos | 0–6 |
+| 5 | Kronos | 0–10 |
+| 6 | Shaar | 0–6 |
+| 7 | The Valix Belt | 0–6 |
+| 8 | Orxon | 0–6 |
+| 10 | Planet Torval | 0–4 |
+| 11 | Stygia | 0–6 |
+| 13 | Maraxus | 0–6 |
+| 14 | Ghost Station | 0–3 |
+| 15 | DreadZone Station Interior | 0–3 |
+
+Planet=4 and mission=2 requests Sarathos mission 2. Campaign targets native level
+4; Cooperative targets native level 24 automatically. Do not send 24 as the planet
+ID. Multiplayer/custom-map contexts reject this command, and campaign/co-op travel
+cannot select the other mode. Invalid planets return error 10; invalid missions
+return error 11. The operation waits for pause to close, then uses the native
+transition with save=false. It does not unlock missions or alter progression flags.
+Completion requires observing the transition and the requested level/mission.
+
+### Common request lifecycle
 
 1. Verify magic, advancing heartbeat, availability, context and capabilities.
 2. Wait for earlier accepted work to finish. Choose a fresh nonzero request ID.

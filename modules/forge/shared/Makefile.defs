@@ -1,0 +1,6 @@
+EE_OBJS += shared/bridge.o
+ifneq ($(filter singleplayer/travel.o cooperative/travel.o,$(EE_OBJS)),)
+EE_OBJS += shared/travel.o shared/catalog.o
+EE_CFLAGS += -DFORGE_TRAVEL_ENABLED
+RAC4_NAMESPACE = forgeTravel_
+endif

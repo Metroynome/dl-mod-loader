@@ -1,0 +1,2 @@
+EE_OBJS += multiplayer/main.o multiplayer/freecam.o
+EE_CFLAGS += -DFORGE_MULTIPLAYER
